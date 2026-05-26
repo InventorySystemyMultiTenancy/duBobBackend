@@ -138,7 +138,7 @@ model Order {
   userId         String?
   mesaId         String?
   comandaId      String?
-  status         OrderStatus  @default(PREPARANDO)
+  status         OrderStatus  @default(RECEBIDO)
   total          Decimal      @db.Decimal(10, 2)
   paymentStatus  PaymentStatus @default(PENDENTE)
   deliveryAddress String?

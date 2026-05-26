@@ -98,7 +98,7 @@ export class OrderService {
           ...(comandaId ? { comandaId } : {}),
           deliveryAddress: deliveryAddress ?? null,
           notes,
-          status: "PREPARANDO",
+          status: "RECEBIDO",
           total: new Prisma.Decimal(fromCents(totalCents)),
           paymentStatus: "PENDENTE",
           ...(isPickup != null ? { isPickup } : {}),
@@ -217,7 +217,7 @@ export class OrderService {
       userId: order.userId,
       mesaId: order.mesaId,
       comandaId: order.comandaId,
-      status: order.status ?? "PREPARANDO",
+      status: order.status ?? "RECEBIDO",
       total: Number(order.total ?? 0),
     });
 
