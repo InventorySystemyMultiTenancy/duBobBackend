@@ -345,7 +345,7 @@ export class OrderRepository {
              o."deliveryAddress", o.notes, o."paymentMethod",
              o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
              o."isPickup", o."assignedMotoboyId", o."deliveryCode",
-             o."createdAt", o."updatedAt", o."deliveredAt"
+             o."terminalIntentId", o."createdAt", o."updatedAt", o."deliveredAt"
       FROM "Order" o WHERE o.id = ${orderId}
     `;
     if (!rows.length) return null;

@@ -19,6 +19,7 @@ import { prisma } from "./lib/prisma.js";
 import { DeliveryService } from "./services/DeliveryService.js";
 import { deliveryFreightSchema } from "./validators/orderSchemas.js";
 import { emitChamarGarcom } from "./realtime/socketServer.js";
+import { AppSettingRepository } from "./repositories/AppSettingRepository.js";
 
 // ── Variáveis de ambiente críticas ───────────────────────────────────────────
 const REQUIRED_ENV = ["JWT_SECRET", "DATABASE_URL"];
@@ -46,6 +47,7 @@ const paymentController = new PaymentController();
 const productController = new ProductController();
 const mesaController = new MesaController();
 const comandaController = new ComandaController();
+const appSettingRepository = new AppSettingRepository();
 
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173")
   .split(",")
@@ -436,6 +438,47 @@ app.post(
 
 app.post("/api/payments/preference", authenticateToken, (req, res, next) =>
   paymentController.createPreference(req, res, next),
+);
+
+app.get(
+  "/api/admin/settings/totem-terminal",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (_req, res, next) => {
+    try {
+      const setting = await appSettingRepository.get("totem_terminal_id");
+      return res.status(200).json({
+        data: { terminalId: setting?.value ?? "" },
+      });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+app.put(
+  "/api/admin/settings/totem-terminal",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const terminalId = String(req.body?.terminalId ?? "").trim();
+      await appSettingRepository.set("totem_terminal_id", terminalId);
+      return res.status(200).json({
+        message: "Maquininha do Totem atualizada.",
+        data: { terminalId },
+      });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+app.post(
+  "/api/totem/payments/terminal",
+  authenticateToken,
+  authorizeRoles("CLIENTE", "ADMIN"),
+  (req, res, next) => paymentController.createTotemTerminalPayment(req, res, next),
 );
 
 // Mesa: acesso publico por token (QR code)

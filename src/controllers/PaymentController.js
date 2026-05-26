@@ -6,9 +6,11 @@ import {
 import { AppError } from "../errors/AppError.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { MesaRepository } from "../repositories/MesaRepository.js";
+import { AppSettingRepository } from "../repositories/AppSettingRepository.js";
 
 const orderRepository = new OrderRepository();
 const mesaRepository = new MesaRepository();
+const appSettingRepository = new AppSettingRepository();
 
 export class PaymentController {
   async createPreference(req, res, next) {
@@ -298,6 +300,127 @@ export class PaymentController {
         data: {
           intentId: mpOrder.id,
           deviceId: mesa.terminalId,
+          status: mpOrder.status,
+        },
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async createTotemTerminalPayment(req, res, next) {
+    try {
+      const { orderId } = req.body;
+
+      if (!orderId) throw new AppError("orderId obrigatorio.", 422);
+
+      const order = await orderRepository.findById(orderId);
+      if (!order) throw new AppError("Pedido nao encontrado.", 404);
+
+      if (order.userId !== req.user.id && req.user.role !== "ADMIN") {
+        throw new AppError("Acesso negado.", 403);
+      }
+
+      if (order.paymentStatus === "APROVADO") {
+        throw new AppError("Pedido ja pago.", 409);
+      }
+
+      if (order.terminalIntentId) {
+        const mpToken0 = process.env.MP_ACCESS_TOKEN;
+        if (mpToken0) {
+          try {
+            const cancelResp = await fetch(
+              `https://api.mercadopago.com/v1/orders/${order.terminalIntentId}`,
+              {
+                method: "PATCH",
+                headers: {
+                  Authorization: `Bearer ${mpToken0}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ status: "canceled" }),
+              },
+            );
+
+            if (!cancelResp.ok) {
+              const errBody = await cancelResp.json().catch(() => ({}));
+              console.warn(
+                "[createTotemTerminalPayment] Nao foi possivel cancelar intent anterior:",
+                errBody?.message,
+              );
+            }
+          } catch (e) {
+            console.warn(
+              "[createTotemTerminalPayment] Erro ao cancelar intent anterior:",
+              e.message,
+            );
+          }
+        }
+      }
+
+      const terminalSetting = await appSettingRepository.get(
+        "totem_terminal_id",
+      );
+      const terminalId = terminalSetting?.value?.trim();
+
+      if (!terminalId) {
+        throw new AppError("Totem sem maquininha configurada.", 422);
+      }
+
+      const mpToken = process.env.MP_ACCESS_TOKEN;
+      if (!mpToken) throw new AppError("Mercado Pago nao configurado.", 500);
+
+      const orderBody = {
+        type: "point",
+        external_reference: order.id,
+        description: `Pedido Totem #${order.id.slice(-6).toUpperCase()}`,
+        transactions: {
+          payments: [
+            {
+              amount: Number(order.total).toFixed(2),
+            },
+          ],
+        },
+        config: {
+          point: {
+            terminal_id: terminalId,
+            print_on_terminal: "no_ticket",
+          },
+        },
+      };
+
+      const idempotencyKey = `totem-${order.id}-${Date.now()}`;
+      const mpResponse = await fetch("https://api.mercadopago.com/v1/orders", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${mpToken}`,
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify(orderBody),
+      });
+
+      if (!mpResponse.ok) {
+        const errBody = await mpResponse.json().catch(() => ({}));
+        console.error(
+          "[createTotemTerminalPayment] MP error:",
+          JSON.stringify(errBody),
+        );
+        throw new AppError(
+          errBody?.message || "Erro ao enviar para a maquininha.",
+          mpResponse.status >= 500 ? 502 : 422,
+        );
+      }
+
+      const mpOrder = await mpResponse.json();
+
+      if (mpOrder.id) {
+        await orderRepository.saveTerminalIntentId(order.id, mpOrder.id);
+      }
+
+      return res.status(200).json({
+        data: {
+          intentId: mpOrder.id,
+          deviceId: terminalId,
           status: mpOrder.status,
         },
       });
