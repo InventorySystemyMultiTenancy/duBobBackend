@@ -1,0 +1,11 @@
+SELECT 'Addon' AS table_name, count(*) AS rows FROM public."Addon";
+SELECT 'Mesa' AS table_name, count(*) AS rows FROM public."Mesa";
+SELECT 'Order' AS table_name, count(*) AS rows FROM public."Order";
+SELECT 'OrderItem' AS table_name, count(*) AS rows FROM public."OrderItem";
+SELECT 'Payment' AS table_name, count(*) AS rows FROM public."Payment";
+SELECT 'Product' AS table_name, count(*) AS rows FROM public."Product";
+SELECT 'ProductSize' AS table_name, count(*) AS rows FROM public."ProductSize";
+SELECT 'PurchasePendingList' AS table_name, count(*) AS rows FROM public."PurchasePendingList";
+SELECT 'PurchasePendingListItem' AS table_name, count(*) AS rows FROM public."PurchasePendingListItem";
+SELECT 'User' AS table_name, count(*) AS rows FROM public."User";
+SELECT '_prisma_migrations' AS table_name, count(*) AS rows FROM public."_prisma_migrations";

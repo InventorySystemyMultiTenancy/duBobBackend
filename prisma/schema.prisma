@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  FUNCIONARIO
+  ATENDENTE
+  COZINHA
+  MOTOBOY
+  CLIENTE
+  MESA
+  COMANDA
+}
+
+enum ProductSizeEnum {
+  PEQUENA
+  MEDIA
+  GRANDE
+  FAMILIA
+}
+
+enum OrderStatus {
+  RECEBIDO
+  PREPARANDO
+  PRONTO
+  SAIU_PARA_ENTREGA
+  ENTREGUE
+  CANCELADO
+}
+
+enum PaymentStatus {
+  PENDENTE
+  APROVADO
+  RECUSADO
+  ESTORNADO
+}
+
+enum OrderItemType {
+  INTEIRA
+  MEIO_A_MEIO
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String?  @unique
+  phone        String?  @unique
+  cpf          String?  @unique
+  address      String?
+  passwordHash String
+  role         Role     @default(CLIENTE)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orders       Order[]
+  purchasePendingLists PurchasePendingList[]
+}
+
+model Product {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  imageUrl    String?
+  category    String?       @default("Geral")
+  isCrust     Boolean       @default(false)
+  stock       Int           @default(0)
+  stockMinimum Int          @default(0)
+  availableDays String[]    @default([])
+  waiterOnly  Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  sizes       ProductSize[]
+  orderItems  OrderItem[]
+  purchaseItems PurchasePendingListItem[]
+}
+
+model PurchasePendingList {
+  id          String                  @id @default(cuid())
+  observation String?
+  createdBy   String?
+  createdAt   DateTime                @default(now())
+
+  creator     User?                   @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  items       PurchasePendingListItem[]
+
+  @@index([createdAt])
+}
+
+model PurchasePendingListItem {
+  id          String             @id @default(cuid())
+  listId      String
+  productId   String
+  quantity    Int
+  createdAt   DateTime           @default(now())
+
+  list        PurchasePendingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  product     Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([listId])
+  @@index([productId])
+}
+
+model Addon {
+  id        String   @id @default(cuid())
+  name      String
+  price     Decimal  @db.Decimal(10, 2)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProductSize {
+  id        String          @id @default(cuid())
+  productId String
+  size      ProductSizeEnum
+  label     String?
+  price     Decimal         @db.Decimal(10, 2)
+  costPrice Decimal?        @db.Decimal(10, 2)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, size])
+}
+
+model Order {
+  id             String       @id @default(cuid())
+  userId         String?
+  mesaId         String?
+  comandaId      String?
+  status         OrderStatus  @default(PREPARANDO)
+  total          Decimal      @db.Decimal(10, 2)
+  paymentStatus  PaymentStatus @default(PENDENTE)
+  deliveryAddress String?
+  deliveryFee    Decimal?     @db.Decimal(10, 2)
+  deliveryLat    Float?
+  deliveryLon    Float?
+  paymentMethod  String?
+  isPickup       Boolean      @default(false)
+  assignedMotoboyId String?
+  deliveryCode   String?
+  notes          String?
+  terminalIntentId String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deliveredAt    DateTime?
+
+  user           User?        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  mesa           Mesa?        @relation(fields: [mesaId], references: [id], onDelete: Restrict)
+  comanda        Comanda?     @relation(fields: [comandaId], references: [id], onDelete: Restrict)
+  items          OrderItem[]
+  payment        Payment?
+}
+
+model OrderItem {
+  id                 String   @id @default(cuid())
+  orderId            String
+  productId          String
+  quantity           Int      @default(1)
+  unitPrice          Decimal  @db.Decimal(10, 2)
+  totalPrice         Decimal  @db.Decimal(10, 2)
+  addons             Json?
+  removedIngredients String?
+  notes              String?
+
+  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  orderId     String        @unique
+  provider    String
+  externalId  String?       @unique
+  amount      Decimal       @db.Decimal(10, 2)
+  status      PaymentStatus @default(PENDENTE)
+  payload     Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Mesa {
+  id          String   @id @default(cuid())
+  name        String
+  number      Int      @unique
+  terminalId  String?
+  accessToken String   @unique @default(cuid())
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders      Order[]
+}
+
+model Comanda {
+  id          String   @id @default(cuid())
+  name        String
+  number      Int      @unique
+  accessToken String   @unique @default(cuid())
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders      Order[]
+}

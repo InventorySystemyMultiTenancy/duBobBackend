@@ -1,0 +1,2 @@
+ALTER TABLE "Product"
+ADD COLUMN "availableDays" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

@@ -1,0 +1,1 @@
+ALTER TABLE "ProductSize" ADD COLUMN IF NOT EXISTS "label" TEXT;
