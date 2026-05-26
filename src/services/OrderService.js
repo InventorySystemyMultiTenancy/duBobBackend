@@ -1122,7 +1122,7 @@ export class OrderService {
       if (err.message === "CODE_INVALID")
         throw new AppError("Código inválido.", 400);
       if (err.message === "STATUS_INVALID")
-        throw new AppError("Pedido não está em trânsito.", 400);
+        throw new AppError("Pedido nao esta em transito.", 400);
       if (err.message === "IS_PICKUP")
         throw new AppError("Pedido de retirada não usa código.", 400);
       throw err;
