@@ -1,7 +1,12 @@
 import { ZodError } from "zod";
 import { AppError } from "../errors/AppError.js";
 import { AuthService } from "../services/AuthService.js";
-import { loginSchema, registerSchema } from "../validators/authSchemas.js";
+import {
+  loginSchema,
+  registerSchema,
+  totemCpfSchema,
+  totemGuestSchema,
+} from "../validators/authSchemas.js";
 
 const authService = new AuthService();
 
@@ -41,6 +46,34 @@ export class AuthController {
 
       return res.status(200).json({
         message: "Login realizado com sucesso.",
+        data: result,
+      });
+    } catch (error) {
+      return this.#handleError(error, next);
+    }
+  }
+
+  async loginTotemByCpf(req, res, next) {
+    try {
+      const payload = totemCpfSchema.parse(req.body);
+      const result = await authService.loginTotemByCpf(payload);
+
+      return res.status(200).json({
+        message: "Cliente encontrado com sucesso.",
+        data: result,
+      });
+    } catch (error) {
+      return this.#handleError(error, next);
+    }
+  }
+
+  async createTotemGuest(req, res, next) {
+    try {
+      const payload = totemGuestSchema.parse(req.body);
+      const result = await authService.createTotemGuest(payload);
+
+      return res.status(201).json({
+        message: "Cliente temporario criado com sucesso.",
         data: result,
       });
     } catch (error) {

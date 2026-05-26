@@ -228,6 +228,14 @@ app.post("/api/auth/login", authLimiter, (req, res, next) =>
   authController.login(req, res, next),
 );
 
+app.post("/api/auth/totem/cpf", authLimiter, (req, res, next) =>
+  authController.loginTotemByCpf(req, res, next),
+);
+
+app.post("/api/auth/totem/guest", authLimiter, (req, res, next) =>
+  authController.createTotemGuest(req, res, next),
+);
+
 app.post(
   "/api/auth/users",
   authenticateToken,

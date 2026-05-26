@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { AppError } from "../errors/AppError.js";
 import { UserRepository } from "../repositories/UserRepository.js";
@@ -16,10 +17,33 @@ export class AuthService {
     this.userRepository = userRepository;
   }
 
+  #buildClientSession(user) {
+    const token = jwt.sign(
+      { role: user.role, email: user.email || null },
+      process.env.JWT_SECRET,
+      { subject: user.id, expiresIn: process.env.JWT_EXPIRES_IN || "8h" },
+    );
+
+    return {
+      accessToken: token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        cpf: user.cpf,
+        address: user.address,
+        role: user.role,
+      },
+    };
+  }
+
   async register(
     { name, email, phone, cpf, address, password, role },
     authUser = null,
   ) {
+    const normalizedCpf = cpf ? String(cpf).replace(/\D/g, "") : null;
+
     if (email) {
       const existingByEmail = await this.userRepository.findByEmail(email);
       if (existingByEmail) throw new AppError("Email ja cadastrado.", 409);
@@ -30,8 +54,8 @@ export class AuthService {
       if (existingByPhone) throw new AppError("Telefone ja cadastrado.", 409);
     }
 
-    if (cpf) {
-      const existingByCpf = await this.userRepository.findByCpf(cpf);
+    if (normalizedCpf) {
+      const existingByCpf = await this.userRepository.findByCpf(normalizedCpf);
       if (existingByCpf) throw new AppError("CPF ja cadastrado.", 409);
     }
 
@@ -54,29 +78,14 @@ export class AuthService {
       name,
       email: email || null,
       phone: phone || null,
-      cpf: cpf || null,
+      cpf: normalizedCpf,
       address: address || null,
       passwordHash,
       role: requestedRole,
     });
 
     if (requestedRole === "CLIENTE") {
-      const token = jwt.sign(
-        { role: user.role, email: user.email || null },
-        process.env.JWT_SECRET,
-        { subject: user.id, expiresIn: process.env.JWT_EXPIRES_IN || "8h" },
-      );
-      return {
-        accessToken: token,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          address: user.address,
-          role: user.role,
-        },
-      };
+      return this.#buildClientSession(user);
     }
 
     return { user };
@@ -90,22 +99,33 @@ export class AuthService {
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) throw new AppError("Credenciais invalidas.", 401);
 
-    const token = jwt.sign(
-      { role: user.role, email: user.email || null },
-      process.env.JWT_SECRET,
-      { subject: user.id, expiresIn: process.env.JWT_EXPIRES_IN || "8h" },
-    );
+    return this.#buildClientSession(user);
+  }
 
-    return {
-      accessToken: token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        address: user.address,
-        role: user.role,
-      },
-    };
+  async loginTotemByCpf({ cpf }) {
+    const normalizedCpf = String(cpf || "").replace(/\D/g, "");
+    const user = await this.userRepository.findByCpf(normalizedCpf);
+
+    if (!user) throw new AppError("CPF nao cadastrado.", 404);
+    if (user.role !== "CLIENTE") {
+      throw new AppError("Este CPF nao pertence a um cliente.", 403);
+    }
+
+    return this.#buildClientSession(user);
+  }
+
+  async createTotemGuest({ name }) {
+    const passwordHash = await bcrypt.hash(crypto.randomUUID(), 10);
+    const user = await this.userRepository.create({
+      name,
+      email: null,
+      phone: null,
+      cpf: null,
+      address: null,
+      passwordHash,
+      role: "CLIENTE",
+    });
+
+    return this.#buildClientSession(user);
   }
 }

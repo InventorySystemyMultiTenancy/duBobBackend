@@ -33,16 +33,26 @@ export class UserRepository {
   }
 
   async findByCpf(cpf) {
+    const normalizedCpf = String(cpf || "").replace(/\D/g, "");
     const rows = await prisma.$queryRaw`
-      SELECT * FROM "User" WHERE "cpf" = ${cpf} LIMIT 1
+      SELECT * FROM "User"
+      WHERE "cpf" = ${cpf}
+        OR (${normalizedCpf.length === 11}
+          AND regexp_replace(COALESCE("cpf", ''), '[^0-9]', '', 'g') = ${normalizedCpf})
+      LIMIT 1
     `;
     return rows[0] ? mapRow(rows[0]) : null;
   }
 
   async findByEmailOrPhone(identifier) {
+    const normalizedCpf = String(identifier || "").replace(/\D/g, "");
     const rows = await prisma.$queryRaw`
       SELECT * FROM "User"
-      WHERE "email" = ${identifier} OR "phone" = ${identifier}
+      WHERE "email" = ${identifier}
+        OR "phone" = ${identifier}
+        OR "cpf" = ${identifier}
+        OR (${normalizedCpf.length === 11}
+          AND regexp_replace(COALESCE("cpf", ''), '[^0-9]', '', 'g') = ${normalizedCpf})
       LIMIT 1
     `;
     return rows[0] ? mapRow(rows[0]) : null;

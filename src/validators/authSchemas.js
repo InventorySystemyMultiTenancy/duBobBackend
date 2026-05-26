@@ -23,3 +23,11 @@ export const registerSchema = z.object({
     ])
     .optional(),
 });
+
+export const totemCpfSchema = z.object({
+  cpf: z.string().min(11).max(14),
+});
+
+export const totemGuestSchema = z.object({
+  name: z.string().min(2).max(120),
+});
