@@ -9,6 +9,7 @@ import { PaymentController } from "./controllers/PaymentController.js";
 import { ProductController } from "./controllers/ProductController.js";
 import { MesaController } from "./controllers/MesaController.js";
 import { ComandaController } from "./controllers/ComandaController.js";
+import { TotemController } from "./controllers/TotemController.js";
 import {
   authenticateToken,
   authorizeRoles,
@@ -47,6 +48,7 @@ const paymentController = new PaymentController();
 const productController = new ProductController();
 const mesaController = new MesaController();
 const comandaController = new ComandaController();
+const totemController = new TotemController();
 const appSettingRepository = new AppSettingRepository();
 
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173")
@@ -479,6 +481,35 @@ app.post(
   authenticateToken,
   authorizeRoles("CLIENTE", "ADMIN"),
   (req, res, next) => paymentController.createTotemTerminalPayment(req, res, next),
+);
+
+app.get("/api/totens/slug/:slug", (req, res, next) =>
+  totemController.getPublic(req, res, next),
+);
+
+app.get(
+  "/api/totens",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  (req, res, next) => totemController.list(req, res, next),
+);
+app.post(
+  "/api/totens",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  (req, res, next) => totemController.create(req, res, next),
+);
+app.put(
+  "/api/totens/:totemId",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  (req, res, next) => totemController.update(req, res, next),
+);
+app.delete(
+  "/api/totens/:totemId",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  (req, res, next) => totemController.delete(req, res, next),
 );
 
 // Mesa: acesso publico por token (QR code)

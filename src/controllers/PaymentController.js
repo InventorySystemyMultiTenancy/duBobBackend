@@ -7,10 +7,12 @@ import { AppError } from "../errors/AppError.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { MesaRepository } from "../repositories/MesaRepository.js";
 import { AppSettingRepository } from "../repositories/AppSettingRepository.js";
+import { TotemService } from "../services/TotemService.js";
 
 const orderRepository = new OrderRepository();
 const mesaRepository = new MesaRepository();
 const appSettingRepository = new AppSettingRepository();
+const totemService = new TotemService();
 
 export class PaymentController {
   async createPreference(req, res, next) {
@@ -310,7 +312,7 @@ export class PaymentController {
 
   async createTotemTerminalPayment(req, res, next) {
     try {
-      const { orderId } = req.body;
+      const { orderId, totemId, totemSlug } = req.body;
 
       if (!orderId) throw new AppError("orderId obrigatorio.", 422);
 
@@ -357,14 +359,20 @@ export class PaymentController {
         }
       }
 
-      const terminalSetting = await appSettingRepository.get(
-        "totem_terminal_id",
-      );
-      const terminalId = terminalSetting?.value?.trim();
+      const totem =
+        totemId || totemSlug
+          ? await totemService.findByPaymentRef({ totemId, totemSlug })
+          : null;
+      let terminalId = totem?.terminalId?.trim();
 
       if (!terminalId) {
-        throw new AppError("Totem sem maquininha configurada.", 422);
+        const terminalSetting = await appSettingRepository.get(
+          "totem_terminal_id",
+        );
+        terminalId = terminalSetting?.value?.trim();
       }
+
+      if (!terminalId) throw new AppError("Totem sem maquininha configurada.", 422);
 
       const mpToken = process.env.MP_ACCESS_TOKEN;
       if (!mpToken) throw new AppError("Mercado Pago nao configurado.", 500);
@@ -372,7 +380,7 @@ export class PaymentController {
       const orderBody = {
         type: "point",
         external_reference: order.id,
-        description: `Pedido Totem #${order.id.slice(-6).toUpperCase()}`,
+        description: `Pedido ${totem?.name ?? "Totem"} #${order.id.slice(-6).toUpperCase()}`,
         transactions: {
           payments: [
             {
