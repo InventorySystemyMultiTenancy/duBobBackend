@@ -89,11 +89,17 @@ async function fetchSizeLabels(productIds) {
 async function applySizeLabels(tx, productId, sizes = []) {
   for (const size of sizes) {
     if (size.label === undefined) continue;
-    await tx.$executeRaw`
-      UPDATE "ProductSize"
-      SET "label" = ${size.label?.trim() || null}
-      WHERE "productId" = ${productId} AND "size" = ${size.size}
-    `;
+    try {
+      await tx.$executeRaw`
+        UPDATE "ProductSize"
+        SET "label" = ${size.label?.trim() || null}
+        WHERE "productId" = ${productId} AND "size" = ${size.size}
+      `;
+    } catch (error) {
+      if (error?.code !== "P2010" && error?.code !== "P2022") {
+        throw error;
+      }
+    }
   }
 }
 
