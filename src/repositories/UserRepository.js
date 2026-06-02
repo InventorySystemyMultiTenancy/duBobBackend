@@ -71,6 +71,7 @@ export class UserRepository {
       "FUNCIONARIO",
       "ATENDENTE",
       "COZINHA",
+      "COZINHA_DELIVERY",
       "MOTOBOY",
       "CLIENTE",
     ];

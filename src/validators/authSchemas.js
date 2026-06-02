@@ -18,6 +18,7 @@ export const registerSchema = z.object({
       "FUNCIONARIO",
       "ATENDENTE",
       "COZINHA",
+      "COZINHA_DELIVERY",
       "MOTOBOY",
       "CLIENTE",
     ])

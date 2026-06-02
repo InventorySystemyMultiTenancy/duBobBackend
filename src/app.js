@@ -250,7 +250,13 @@ app.post(
 app.get(
   "/api/orders",
   authenticateToken,
-  authorizeRoles("ADMIN", "FUNCIONARIO", "ATENDENTE", "COZINHA"),
+  authorizeRoles(
+    "ADMIN",
+    "FUNCIONARIO",
+    "ATENDENTE",
+    "COZINHA",
+    "COZINHA_DELIVERY",
+  ),
   (req, res, next) => orderController.listAll(req, res, next),
 );
 
@@ -345,6 +351,7 @@ app.get(
     "CLIENTE",
     "ADMIN",
     "COZINHA",
+    "COZINHA_DELIVERY",
     "FUNCIONARIO",
     "ATENDENTE",
     "MOTOBOY",
@@ -364,14 +371,21 @@ app.patch(
 app.patch(
   "/api/orders/:orderId/assign-motoboy",
   authenticateToken,
-  authorizeRoles("ADMIN", "FUNCIONARIO", "COZINHA"),
+  authorizeRoles("ADMIN", "FUNCIONARIO", "COZINHA", "COZINHA_DELIVERY"),
   (req, res, next) => orderController.assignMotoboy(req, res, next),
 );
 
 app.post(
   "/api/orders/:orderId/confirm-delivery",
   authenticateToken,
-  authorizeRoles("ADMIN", "FUNCIONARIO", "ATENDENTE", "COZINHA", "MOTOBOY"),
+  authorizeRoles(
+    "ADMIN",
+    "FUNCIONARIO",
+    "ATENDENTE",
+    "COZINHA",
+    "COZINHA_DELIVERY",
+    "MOTOBOY",
+  ),
   (req, res, next) => orderController.confirmDelivery(req, res, next),
 );
 
@@ -385,7 +399,7 @@ app.patch(
 app.get(
   "/api/admin/motoboys",
   authenticateToken,
-  authorizeRoles("ADMIN", "FUNCIONARIO", "COZINHA"),
+  authorizeRoles("ADMIN", "FUNCIONARIO", "COZINHA", "COZINHA_DELIVERY"),
   async (_req, res, next) => {
     try {
       const motoboys = await prisma.$queryRaw`
@@ -408,7 +422,13 @@ app.delete(
 app.patch(
   "/api/orders/:orderId/status",
   authenticateToken,
-  authorizeRoles("ADMIN", "COZINHA", "FUNCIONARIO", "ATENDENTE"),
+  authorizeRoles(
+    "ADMIN",
+    "COZINHA",
+    "COZINHA_DELIVERY",
+    "FUNCIONARIO",
+    "ATENDENTE",
+  ),
   (req, res, next) => orderController.updateStatus(req, res, next),
 );
 

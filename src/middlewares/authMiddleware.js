@@ -56,6 +56,7 @@ export const enforceOrderOwnership = async (req, _res, next) => {
     if (
       req.user.role === "ADMIN" ||
       req.user.role === "COZINHA" ||
+      req.user.role === "COZINHA_DELIVERY" ||
       req.user.role === "FUNCIONARIO" ||
       req.user.role === "ATENDENTE" ||
       req.user.role === "MOTOBOY"

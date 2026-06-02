@@ -8,6 +8,7 @@ const STAFF_ROLES = new Set([
   "FUNCIONARIO",
   "ATENDENTE",
   "COZINHA",
+  "COZINHA_DELIVERY",
   "MOTOBOY",
 ]);
 
