@@ -62,6 +62,7 @@ model User {
 
   orders       Order[]
   purchasePendingLists PurchasePendingList[]
+  expenses     Expense[]
 }
 
 model Product {
@@ -190,6 +191,24 @@ model Payment {
   updatedAt   DateTime      @updatedAt
 
   order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  observation String?
+  amount      Decimal  @db.Decimal(10, 2)
+  spentAt     DateTime @default(now())
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  creator     User?    @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([spentAt])
+  @@index([category])
+  @@index([createdBy])
 }
 
 model Mesa {

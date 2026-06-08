@@ -667,7 +667,7 @@ export class OrderRepository {
           o."paymentStatus"::text AS "paymentStatus",
           o."deliveryAddress", o.notes, o."paymentMethod",
           o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
-          o."isPickup", o."assignedMotoboyId",
+          o."isPickup", o."assignedMotoboyId", o."deliveryCode",
           o."createdAt", o."updatedAt", o."deliveredAt"
         FROM "Order" o
         WHERE o.status::text NOT IN ('ENTREGUE','CANCELADO')
@@ -690,6 +690,7 @@ export class OrderRepository {
               o.id,
               o."user_id" AS "userId",
               o."mesa_id" AS "mesaId",
+              o."comanda_id" AS "comandaId",
               o.status::text AS status,
               o."payment_status"::text AS "paymentStatus",
               o."delivery_address" AS "deliveryAddress",
@@ -701,6 +702,7 @@ export class OrderRepository {
               o."delivery_lon" AS "deliveryLon",
               o."is_pickup" AS "isPickup",
               o."assigned_motoboy_id" AS "assignedMotoboyId",
+              o."delivery_code" AS "deliveryCode",
               o."created_at" AS "createdAt",
               o."updated_at" AS "updatedAt",
               o."delivered_at" AS "deliveredAt"
@@ -749,6 +751,7 @@ export class OrderRepository {
           deliveryLon: order.deliveryLon ?? null,
           isPickup: order.isPickup ?? false,
           assignedMotoboyId: order.assignedMotoboyId ?? null,
+          deliveryCode: order.deliveryCode ?? null,
           deliveredAt: order.deliveredAt ?? null,
         }));
 

@@ -4,6 +4,7 @@ import { AppError } from "../errors/AppError.js";
 import { prisma } from "../lib/prisma.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { PaymentRepository } from "../repositories/PaymentRepository.js";
+import { ExpenseService } from "./ExpenseService.js";
 import {
   emitOrderCreated,
   emitOrderStatusUpdated,
@@ -39,10 +40,14 @@ const isMercadoPagoInternalReference = (value) =>
 export class OrderService {
   constructor(
     orderRepository = new OrderRepository(),
-    paymentRepository = new PaymentRepository(),
+    productRepositoryOrPaymentRepository = new PaymentRepository(),
+    paymentRepository = null,
+    expenseService = new ExpenseService(),
   ) {
     this.orderRepository = orderRepository;
-    this.paymentRepository = paymentRepository;
+    this.paymentRepository =
+      paymentRepository ?? productRepositoryOrPaymentRepository;
+    this.expenseService = expenseService;
   }
 
   async createOrder({
@@ -787,13 +792,22 @@ export class OrderService {
     return this.orderRepository.findForMotoboy();
   }
 
-  async listActiveOrders() {
+  async listActiveOrders(user) {
     console.log("[listActiveOrders] start");
     try {
       const orders = await this.orderRepository.findAllActive();
       console.log("[listActiveOrders] repository orders count=", orders.length);
 
-      const filtered = orders.filter((o) => o.status !== "CANCELADO");
+      const filtered = orders.filter((o) => {
+        if (o.status === "CANCELADO") return false;
+        if (user?.role === "COZINHA_DELIVERY") {
+          return !o.mesaId && !o.comandaId;
+        }
+        if (user?.role === "COZINHA") {
+          return Boolean(o.mesaId || o.comandaId);
+        }
+        return true;
+      });
       console.log("[listActiveOrders] filtered orders count=", filtered.length);
 
       if (filtered[0]) {
@@ -895,9 +909,17 @@ export class OrderService {
       0,
     );
     const totalCost = paidOrders.reduce((sum, o) => sum + orderCost(o), 0);
+    const totalExpenses = await this.expenseService.sumExpenses({
+      from: rangeStart ?? undefined,
+      to: rangeEnd ?? undefined,
+    });
 
     const revenueToday = paidToday.reduce((sum, o) => sum + Number(o.total), 0);
     const costToday = paidToday.reduce((sum, o) => sum + orderCost(o), 0);
+    const expensesToday = await this.expenseService.sumExpenses({
+      from: todayStart,
+      to: now,
+    });
 
     const revenueThisMonth = paidThisMonth.reduce(
       (sum, o) => sum + Number(o.total),
@@ -907,6 +929,10 @@ export class OrderService {
       (sum, o) => sum + orderCost(o),
       0,
     );
+    const expensesThisMonth = await this.expenseService.sumExpenses({
+      from: monthStart,
+      to: now,
+    });
 
     const averageTicket = paidOrders.length
       ? totalRevenue / paidOrders.length
@@ -978,7 +1004,7 @@ export class OrderService {
       );
       while (cur <= end) {
         const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`;
-        salesMap.set(key, { revenue: 0, cost: 0 });
+        salesMap.set(key, { revenue: 0, cost: 0, expenses: 0 });
         cur.setMonth(cur.getMonth() + 1);
       }
       for (const order of paidOrders) {
@@ -995,7 +1021,7 @@ export class OrderService {
       cur.setHours(0, 0, 0, 0);
       while (cur <= chartToDate) {
         const key = cur.toISOString().slice(0, 10);
-        salesMap.set(key, { revenue: 0, cost: 0 });
+        salesMap.set(key, { revenue: 0, cost: 0, expenses: 0 });
         cur.setDate(cur.getDate() + 1);
       }
       for (const order of paidOrders) {
@@ -1006,6 +1032,29 @@ export class OrderService {
           entry.revenue += Number(order.total);
           entry.cost += orderCost(order);
         }
+      }
+    }
+
+    const chartExpenses = await prisma.expense.findMany({
+      where: {
+        spentAt: {
+          gte: chartFrom,
+          lte: chartToDate,
+        },
+      },
+      select: {
+        amount: true,
+        spentAt: true,
+      },
+    });
+
+    for (const expense of chartExpenses) {
+      const spentAt = new Date(expense.spentAt);
+      const key = groupByMonth
+        ? `${spentAt.getFullYear()}-${String(spentAt.getMonth() + 1).padStart(2, "0")}`
+        : spentAt.toISOString().slice(0, 10);
+      if (salesMap.has(key)) {
+        salesMap.get(key).expenses += Number(expense.amount);
       }
     }
 
@@ -1030,13 +1079,22 @@ export class OrderService {
       summary: {
         totalRevenue: Number(totalRevenue.toFixed(2)),
         totalCost: Number(totalCost.toFixed(2)),
-        totalProfit: Number((totalRevenue - totalCost).toFixed(2)),
+        totalExpenses: Number(totalExpenses.toFixed(2)),
+        totalProfit: Number(
+          (totalRevenue - totalCost - totalExpenses).toFixed(2),
+        ),
         revenueToday: Number(revenueToday.toFixed(2)),
         costToday: Number(costToday.toFixed(2)),
-        profitToday: Number((revenueToday - costToday).toFixed(2)),
+        expensesToday: Number(expensesToday.toFixed(2)),
+        profitToday: Number(
+          (revenueToday - costToday - expensesToday).toFixed(2),
+        ),
         revenueThisMonth: Number(revenueThisMonth.toFixed(2)),
         costThisMonth: Number(costThisMonth.toFixed(2)),
-        profitThisMonth: Number((revenueThisMonth - costThisMonth).toFixed(2)),
+        expensesThisMonth: Number(expensesThisMonth.toFixed(2)),
+        profitThisMonth: Number(
+          (revenueThisMonth - costThisMonth - expensesThisMonth).toFixed(2),
+        ),
         ordersCount: filteredOrders.length,
         paidOrdersCount: paidOrders.length,
         approvedOrdersCount: paidOrders.length,
@@ -1061,12 +1119,15 @@ export class OrderService {
           revenue: Number(item.revenue.toFixed(2)),
         }))
         .filter((item) => item.orders > 0),
-      dailySales: [...salesMap.entries()].map(([date, { revenue, cost }]) => ({
-        date,
-        revenue: Number(revenue.toFixed(2)),
-        cost: Number(cost.toFixed(2)),
-        profit: Number((revenue - cost).toFixed(2)),
-      })),
+      dailySales: [...salesMap.entries()].map(
+        ([date, { revenue, cost, expenses }]) => ({
+          date,
+          revenue: Number(revenue.toFixed(2)),
+          cost: Number(cost.toFixed(2)),
+          expenses: Number(expenses.toFixed(2)),
+          profit: Number((revenue - cost - expenses).toFixed(2)),
+        }),
+      ),
       topProducts,
     };
   }

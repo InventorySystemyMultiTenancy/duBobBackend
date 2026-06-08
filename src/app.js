@@ -10,6 +10,7 @@ import { ProductController } from "./controllers/ProductController.js";
 import { MesaController } from "./controllers/MesaController.js";
 import { ComandaController } from "./controllers/ComandaController.js";
 import { TotemController } from "./controllers/TotemController.js";
+import { ExpenseController } from "./controllers/ExpenseController.js";
 import {
   authenticateToken,
   authorizeRoles,
@@ -49,6 +50,7 @@ const productController = new ProductController();
 const mesaController = new MesaController();
 const comandaController = new ComandaController();
 const totemController = new TotemController();
+const expenseController = new ExpenseController();
 const appSettingRepository = new AppSettingRepository();
 
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173")
@@ -328,6 +330,20 @@ app.get(
   authenticateToken,
   authorizeRoles("ADMIN", "FUNCIONARIO"),
   (req, res, next) => orderController.analytics(req, res, next),
+);
+
+app.get(
+  "/api/admin/expenses",
+  authenticateToken,
+  authorizeRoles("ADMIN", "FUNCIONARIO"),
+  (req, res, next) => expenseController.list(req, res, next),
+);
+
+app.post(
+  "/api/admin/expenses",
+  authenticateToken,
+  authorizeRoles("ADMIN", "FUNCIONARIO"),
+  (req, res, next) => expenseController.create(req, res, next),
 );
 
 app.post(

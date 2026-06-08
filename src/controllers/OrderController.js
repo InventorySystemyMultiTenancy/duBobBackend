@@ -95,9 +95,9 @@ export class OrderController {
     }
   }
 
-  async listAll(_req, res, next) {
+  async listAll(req, res, next) {
     try {
-      const orders = await orderService.listActiveOrders();
+      const orders = await orderService.listActiveOrders(req.user);
 
       return res.status(200).json({
         data: orders,
