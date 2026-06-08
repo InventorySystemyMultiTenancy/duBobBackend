@@ -51,11 +51,21 @@ function attachSizeLabels(product, labelMap) {
   };
 }
 
+function isMissingSchemaFieldError(error) {
+  return error?.code === "P2010" || error?.code === "P2022";
+}
+
 // Busca metadados via raw SQL (compatível com qualquer versão do Prisma Client)
 async function fetchProductMetadata(ids) {
   if (!ids.length) return new Map();
-  const rows =
-    await prisma.$queryRaw`SELECT "id", "category", "availableDays", "waiterOnly" FROM "Product" WHERE "id" = ANY(${ids})`;
+  let rows;
+  try {
+    rows =
+      await prisma.$queryRaw`SELECT "id", "category", "availableDays", "waiterOnly" FROM "Product" WHERE "id" = ANY(${ids})`;
+  } catch (error) {
+    if (!isMissingSchemaFieldError(error)) throw error;
+    rows = await prisma.$queryRaw`SELECT "id" FROM "Product" WHERE "id" = ANY(${ids})`;
+  }
   return new Map(
     rows.map((r) => [
       r.id,
@@ -86,20 +96,70 @@ async function fetchSizeLabels(productIds) {
   }
 }
 
+async function fetchTableColumns(tx, tableName) {
+  try {
+    const rows = await tx.$queryRaw`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = ${tableName}
+    `;
+    return new Set(rows.map((row) => row.column_name));
+  } catch {
+    return null;
+  }
+}
+
 async function applySizeLabels(tx, productId, sizes = []) {
+  const columns = await fetchTableColumns(tx, "ProductSize");
+  if (columns && !columns.has("label")) return;
+
   for (const size of sizes) {
     if (size.label === undefined) continue;
-    try {
-      await tx.$executeRaw`
+    await tx.$executeRaw`
         UPDATE "ProductSize"
         SET "label" = ${size.label?.trim() || null}
         WHERE "productId" = ${productId} AND "size" = ${size.size}
       `;
-    } catch (error) {
-      if (error?.code !== "P2010" && error?.code !== "P2022") {
-        throw error;
-      }
-    }
+  }
+}
+
+async function fetchProductColumns(tx) {
+  return fetchTableColumns(tx, "Product");
+}
+
+async function updateProductMetadata(
+  tx,
+  productId,
+  { category, availableDays, waiterOnly },
+) {
+  const columns = await fetchProductColumns(tx);
+
+  if (category !== undefined && (!columns || columns.has("category"))) {
+    await tx.$executeRaw`
+        UPDATE "Product"
+        SET "category" = ${category}
+        WHERE "id" = ${productId}
+      `;
+  }
+
+  if (
+    availableDays !== undefined &&
+    (!columns || columns.has("availableDays"))
+  ) {
+    await tx.$executeRaw`
+        UPDATE "Product"
+        SET "availableDays" = ${normalizeAvailableDays(availableDays)}
+        WHERE "id" = ${productId}
+      `;
+  }
+
+  if (waiterOnly !== undefined && (!columns || columns.has("waiterOnly"))) {
+    await tx.$executeRaw`
+        UPDATE "Product"
+        SET "waiterOnly" = ${Boolean(waiterOnly)}
+        WHERE "id" = ${productId}
+      `;
   }
 }
 
@@ -158,14 +218,11 @@ export class ProductRepository {
     });
     const cat = category ?? "Geral";
     const days = normalizeAvailableDays(availableDays);
-    await prisma.$executeRaw`
-      UPDATE "Product"
-      SET
-        "category" = ${cat},
-        "availableDays" = ${days},
-        "waiterOnly" = ${Boolean(waiterOnly)}
-      WHERE "id" = ${product.id}
-    `;
+    await updateProductMetadata(prisma, product.id, {
+      category: cat,
+      availableDays: days,
+      waiterOnly: Boolean(waiterOnly),
+    });
     await applySizeLabels(prisma, product.id, sizes);
     const labelMap = await fetchSizeLabels([product.id]);
     const { stock, stockMinimum, ...rest } = product;
@@ -205,33 +262,16 @@ export class ProductRepository {
         },
       });
 
-      if (
-        category !== undefined ||
-        availableDays !== undefined ||
-        waiterOnly !== undefined
-      ) {
-        const existingRow = await tx.$queryRaw`
-          SELECT "category", "availableDays", "waiterOnly"
-          FROM "Product"
-          WHERE "id" = ${productId}
-        `;
-        const current = existingRow?.[0] ?? {};
-        resolvedCategory = category ?? current.category ?? "Geral";
-        resolvedAvailableDays =
-          availableDays !== undefined
-            ? normalizeAvailableDays(availableDays)
-            : normalizeAvailableDays(current.availableDays);
-        resolvedWaiterOnly =
-          waiterOnly !== undefined ? Boolean(waiterOnly) : current.waiterOnly;
-        await tx.$executeRaw`
-          UPDATE "Product"
-          SET
-            "category" = ${resolvedCategory},
-            "availableDays" = ${resolvedAvailableDays},
-            "waiterOnly" = ${Boolean(resolvedWaiterOnly)}
-          WHERE "id" = ${productId}
-        `;
-      }
+      resolvedCategory = category ?? "Geral";
+      resolvedAvailableDays =
+        availableDays !== undefined ? normalizeAvailableDays(availableDays) : [];
+      resolvedWaiterOnly =
+        waiterOnly !== undefined ? Boolean(waiterOnly) : false;
+      await updateProductMetadata(tx, productId, {
+        category,
+        availableDays,
+        waiterOnly,
+      });
 
       if (sizes) {
         const submittedSizes = new Set(sizes.map(({ size }) => size));
