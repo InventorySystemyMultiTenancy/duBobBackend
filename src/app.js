@@ -258,6 +258,7 @@ app.get(
     "ATENDENTE",
     "COZINHA",
     "COZINHA_DELIVERY",
+    "TV",
   ),
   (req, res, next) => orderController.listAll(req, res, next),
 );

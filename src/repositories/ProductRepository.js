@@ -234,15 +234,33 @@ export class ProductRepository {
       }
 
       if (sizes) {
-        await tx.productSize.deleteMany({ where: { productId } });
-        await tx.productSize.createMany({
-          data: sizes.map(({ size, price, costPrice }) => ({
+        const submittedSizes = new Set(sizes.map(({ size }) => size));
+        await tx.productSize.deleteMany({
+          where: {
             productId,
-            size,
-            price,
-            ...(costPrice != null ? { costPrice } : {}),
-          })),
+            size: { notIn: [...submittedSizes] },
+          },
         });
+        for (const { size, price, costPrice } of sizes) {
+          await tx.productSize.upsert({
+            where: {
+              productId_size: {
+                productId,
+                size,
+              },
+            },
+            update: {
+              price,
+              costPrice: costPrice ?? null,
+            },
+            create: {
+              productId,
+              size,
+              price,
+              ...(costPrice != null ? { costPrice } : {}),
+            },
+          });
+        }
         await applySizeLabels(tx, productId, sizes);
       }
 

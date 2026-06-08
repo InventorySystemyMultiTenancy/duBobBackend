@@ -11,6 +11,7 @@ const STAFF_ROLES = new Set([
   "COZINHA",
   "COZINHA_DELIVERY",
   "MOTOBOY",
+  "TV",
 ]);
 
 export class AuthService {

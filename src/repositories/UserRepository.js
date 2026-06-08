@@ -73,6 +73,7 @@ export class UserRepository {
       "COZINHA",
       "COZINHA_DELIVERY",
       "MOTOBOY",
+      "TV",
       "CLIENTE",
     ];
     const resolvedRole = VALID_ROLES.includes(role) ? role : "CLIENTE";
