@@ -120,7 +120,8 @@ async function applySizeLabels(tx, productId, sizes = []) {
     await tx.$executeRaw`
         UPDATE "ProductSize"
         SET "label" = ${size.label?.trim() || null}
-        WHERE "productId" = ${productId} AND "size" = ${size.size}
+        WHERE "productId" = ${productId}
+          AND "size" = ${size.size}::"ProductSizeEnum"
       `;
   }
 }
