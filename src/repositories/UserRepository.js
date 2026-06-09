@@ -17,6 +17,23 @@ const mapRow = (row) => ({
   createdAt: row.createdAt ?? row.createdat,
 });
 
+async function ensureRoleValue(role) {
+  if (role !== "TV") return;
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_enum
+        WHERE enumlabel = 'TV'
+          AND enumtypid = '"Role"'::regtype
+      ) THEN
+        ALTER TYPE "Role" ADD VALUE 'TV';
+      END IF;
+    END $$
+  `);
+}
+
 export class UserRepository {
   async findByEmail(email) {
     const rows = await prisma.$queryRaw`
@@ -78,6 +95,8 @@ export class UserRepository {
     ];
     const resolvedRole = VALID_ROLES.includes(role) ? role : "CLIENTE";
     const id = randomUUID();
+
+    await ensureRoleValue(resolvedRole);
 
     // Step 1: insert with CLIENTE role via ORM (always valid in stale client)
     await prisma.user.create({

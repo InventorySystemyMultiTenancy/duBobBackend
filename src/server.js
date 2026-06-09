@@ -31,6 +31,16 @@ async function runMigrations() {
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "deliveryCode" TEXT`,
     `ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS "notes" TEXT`,
     `ALTER TABLE "ProductSize" ADD COLUMN IF NOT EXISTS "label" TEXT`,
+    `DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_enum
+          WHERE enumlabel = 'TV'
+            AND enumtypid = '"Role"'::regtype
+        ) THEN
+          ALTER TYPE "Role" ADD VALUE 'TV';
+        END IF;
+      END $$`,
   ];
   for (const sql of migrations) {
     try {
