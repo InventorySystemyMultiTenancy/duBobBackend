@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { prisma } from "../lib/prisma.js";
 
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -163,6 +164,52 @@ async function updateProductMetadata(
   }
 }
 
+async function syncProductSizes(tx, productId, sizes = []) {
+  const productSizeColumns = await fetchTableColumns(tx, "ProductSize");
+  const hasCostPrice = !productSizeColumns || productSizeColumns.has("costPrice");
+  const submittedSizes = sizes.map(({ size }) => size);
+
+  if (submittedSizes.length) {
+    await tx.$executeRaw`
+      DELETE FROM "ProductSize"
+      WHERE "productId" = ${productId}
+        AND NOT ("size"::text = ANY(${submittedSizes}))
+    `;
+  } else {
+    await tx.$executeRaw`
+      DELETE FROM "ProductSize"
+      WHERE "productId" = ${productId}
+    `;
+  }
+
+  for (const { size, price, costPrice } of sizes) {
+    if (hasCostPrice) {
+      await tx.$executeRaw`
+        INSERT INTO "ProductSize"
+          ("id", "productId", "size", "price", "costPrice", "createdAt", "updatedAt")
+        VALUES
+          (${randomUUID()}, ${productId}, ${size}::"ProductSizeEnum", ${price}, ${costPrice ?? null}, NOW(), NOW())
+        ON CONFLICT ("productId", "size")
+        DO UPDATE SET
+          "price" = EXCLUDED."price",
+          "costPrice" = EXCLUDED."costPrice",
+          "updatedAt" = NOW()
+      `;
+    } else {
+      await tx.$executeRaw`
+        INSERT INTO "ProductSize"
+          ("id", "productId", "size", "price", "createdAt", "updatedAt")
+        VALUES
+          (${randomUUID()}, ${productId}, ${size}::"ProductSizeEnum", ${price}, NOW(), NOW())
+        ON CONFLICT ("productId", "size")
+        DO UPDATE SET
+          "price" = EXCLUDED."price",
+          "updatedAt" = NOW()
+      `;
+    }
+  }
+}
+
 export class ProductRepository {
   async findAll() {
     const products = await prisma.product.findMany({
@@ -274,33 +321,7 @@ export class ProductRepository {
       });
 
       if (sizes) {
-        const submittedSizes = new Set(sizes.map(({ size }) => size));
-        await tx.productSize.deleteMany({
-          where: {
-            productId,
-            size: { notIn: [...submittedSizes] },
-          },
-        });
-        for (const { size, price, costPrice } of sizes) {
-          await tx.productSize.upsert({
-            where: {
-              productId_size: {
-                productId,
-                size,
-              },
-            },
-            update: {
-              price,
-              costPrice: costPrice ?? null,
-            },
-            create: {
-              productId,
-              size,
-              price,
-              ...(costPrice != null ? { costPrice } : {}),
-            },
-          });
-        }
+        await syncProductSizes(tx, productId, sizes);
         await applySizeLabels(tx, productId, sizes);
       }
 
