@@ -8,6 +8,38 @@ import {
 
 const productService = new ProductService();
 
+function summarizeProductPayload(body = {}) {
+  return {
+    name: body.name,
+    category: body.category,
+    hasDescription: body.description !== undefined,
+    hasImageUrl: body.imageUrl !== undefined,
+    availableDays: body.availableDays,
+    waiterOnly: body.waiterOnly,
+    isCrust: body.isCrust,
+    sizes: Array.isArray(body.sizes)
+      ? body.sizes.map((size) => ({
+          size: size.size,
+          label: size.label,
+          price: size.price,
+          costPrice: size.costPrice,
+        }))
+      : body.sizes,
+  };
+}
+
+function logProductError(context, error, extra = {}) {
+  console.error(`[${context}] falhou`, {
+    ...extra,
+    name: error?.name,
+    message: error?.message,
+    code: error?.code,
+    meta: error?.meta,
+    clientVersion: error?.clientVersion,
+    stack: error?.stack,
+  });
+}
+
 export class ProductController {
   async list(_req, res, next) {
     try {
@@ -64,14 +96,35 @@ export class ProductController {
 
   async update(req, res, next) {
     try {
+      console.log("[ProductController.update] recebido", {
+        productId: req.params.productId,
+        body: summarizeProductPayload(req.body),
+      });
       const payload = updateProductSchema.parse(req.body);
+      console.log("[ProductController.update] payload validado", {
+        productId: req.params.productId,
+        payload: summarizeProductPayload(payload),
+      });
       const product = await productService.updateProduct(
         req.params.productId,
         payload,
       );
+      console.log("[ProductController.update] produto atualizado", {
+        productId: req.params.productId,
+        sizes: product?.sizes?.map((size) => ({
+          size: size.size,
+          label: size.label,
+          price: size.price,
+          costPrice: size.costPrice,
+        })),
+      });
       return res.status(200).json({ data: product });
     } catch (error) {
-      return this.#handleError(error, next);
+      logProductError("ProductController.update", error, {
+        productId: req.params.productId,
+        body: summarizeProductPayload(req.body),
+      });
+      return this.#handleError(error, next, "ProductController.update");
     }
   }
 
@@ -102,11 +155,17 @@ export class ProductController {
     }
   }
 
-  #handleError(error, next) {
+  #handleError(error, next, context = "ProductController") {
     if (error instanceof ZodError) {
+      logProductError(context, error, {
+        zodIssues: error.errors,
+      });
       return next(
         new AppError(error.errors.map((e) => e.message).join(", "), 422),
       );
+    }
+    if (!(error instanceof AppError)) {
+      logProductError(context, error);
     }
     return next(
       error instanceof AppError ? error : new AppError("Erro interno.", 500),

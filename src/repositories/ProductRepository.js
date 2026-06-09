@@ -165,17 +165,34 @@ async function updateProductMetadata(
 }
 
 async function syncProductSizes(tx, productId, sizes = []) {
+  console.log("[ProductRepository.syncProductSizes] inicio", {
+    productId,
+    sizes,
+  });
   const productSizeColumns = await fetchTableColumns(tx, "ProductSize");
   const hasCostPrice = !productSizeColumns || productSizeColumns.has("costPrice");
   const submittedSizes = sizes.map(({ size }) => size);
+  console.log("[ProductRepository.syncProductSizes] colunas", {
+    productId,
+    productSizeColumns: productSizeColumns ? [...productSizeColumns] : null,
+    hasCostPrice,
+    submittedSizes,
+  });
 
   if (submittedSizes.length) {
+    console.log("[ProductRepository.syncProductSizes] removendo tamanhos ausentes", {
+      productId,
+      submittedSizes,
+    });
     await tx.$executeRaw`
       DELETE FROM "ProductSize"
       WHERE "productId" = ${productId}
         AND NOT ("size"::text = ANY(${submittedSizes}))
     `;
   } else {
+    console.log("[ProductRepository.syncProductSizes] removendo todos tamanhos", {
+      productId,
+    });
     await tx.$executeRaw`
       DELETE FROM "ProductSize"
       WHERE "productId" = ${productId}
@@ -183,6 +200,13 @@ async function syncProductSizes(tx, productId, sizes = []) {
   }
 
   for (const { size, price, costPrice } of sizes) {
+    console.log("[ProductRepository.syncProductSizes] upsert tamanho", {
+      productId,
+      size,
+      price,
+      costPrice,
+      hasCostPrice,
+    });
     if (hasCostPrice) {
       await tx.$executeRaw`
         INSERT INTO "ProductSize"
@@ -208,6 +232,7 @@ async function syncProductSizes(tx, productId, sizes = []) {
       `;
     }
   }
+  console.log("[ProductRepository.syncProductSizes] fim", { productId });
 }
 
 export class ProductRepository {
@@ -295,6 +320,11 @@ export class ProductRepository {
     },
   ) {
     return prisma.$transaction(async (tx) => {
+      console.log("[ProductRepository.update] inicio", {
+        productId,
+        hasSizes: Boolean(sizes),
+        sizes,
+      });
       let resolvedCategory = category;
       let resolvedAvailableDays = availableDays;
       let resolvedWaiterOnly = waiterOnly;
@@ -308,6 +338,9 @@ export class ProductRepository {
           ...(isCrust !== undefined && { isCrust }),
         },
       });
+      console.log("[ProductRepository.update] produto base atualizado", {
+        productId,
+      });
 
       resolvedCategory = category ?? "Geral";
       resolvedAvailableDays =
@@ -315,6 +348,12 @@ export class ProductRepository {
       resolvedWaiterOnly =
         waiterOnly !== undefined ? Boolean(waiterOnly) : false;
       await updateProductMetadata(tx, productId, {
+        category,
+        availableDays,
+        waiterOnly,
+      });
+      console.log("[ProductRepository.update] metadados atualizados", {
+        productId,
         category,
         availableDays,
         waiterOnly,
@@ -328,6 +367,11 @@ export class ProductRepository {
       const updated = await tx.product.findUnique({
         where: { id: productId },
         include: { sizes: { orderBy: { size: "asc" } } },
+      });
+      console.log("[ProductRepository.update] produto recarregado", {
+        productId,
+        found: Boolean(updated),
+        sizes: updated?.sizes,
       });
       const labelMap = await fetchSizeLabels([productId]);
       const { stock, stockMinimum, ...rest } = updated ?? {};
