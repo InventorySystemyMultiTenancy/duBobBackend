@@ -800,11 +800,14 @@ export class OrderService {
 
       const filtered = orders.filter((o) => {
         if (o.status === "CANCELADO") return false;
+        const isTotemOrder =
+          o.paymentMethod === "MAQUININHA_TOTEM" ||
+          String(o.notes || "").includes("Pedido feito no Totem");
         if (user?.role === "COZINHA_DELIVERY") {
-          return !o.mesaId && !o.comandaId;
+          return !o.mesaId && !o.comandaId && !isTotemOrder;
         }
         if (user?.role === "COZINHA") {
-          return Boolean(o.mesaId || o.comandaId);
+          return Boolean(o.mesaId || o.comandaId) || isTotemOrder;
         }
         return true;
       });
@@ -968,11 +971,18 @@ export class OrderService {
 
     const orderTypeMap = new Map([
       ["MESA", { type: "MESA", label: "Mesa", orders: 0, revenue: 0 }],
-      ["RETIRADA", { type: "RETIRADA", label: "Retirada", orders: 0, revenue: 0 }],
+      [
+        "RETIRADA",
+        { type: "RETIRADA", label: "Retirada", orders: 0, revenue: 0 },
+      ],
       ["ENTREGA", { type: "ENTREGA", label: "Entrega", orders: 0, revenue: 0 }],
     ]);
     for (const order of paidOrders) {
-      const type = order.mesaId ? "MESA" : order.isPickup ? "RETIRADA" : "ENTREGA";
+      const type = order.mesaId
+        ? "MESA"
+        : order.isPickup
+          ? "RETIRADA"
+          : "ENTREGA";
       const current = orderTypeMap.get(type);
       current.orders += 1;
       current.revenue += Number(order.total);
