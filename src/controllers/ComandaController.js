@@ -90,7 +90,7 @@ export class ComandaController {
   #handleError(error, next) {
     if (error instanceof ZodError) {
       return next(
-        new AppError(error.errors[0]?.message ?? "Dados invalidos.", 422),
+        new AppError(error.errors[0]?.message ?? "Dados inválidos.", 422),
       );
     }
     return next(error);

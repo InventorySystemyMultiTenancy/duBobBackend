@@ -26,13 +26,13 @@ export class ProductService {
 
   async updateProduct(productId, data) {
     const existing = await this.productRepository.findByIdWithSizes(productId);
-    if (!existing) throw new AppError("Produto nao encontrado.", 404);
+    if (!existing) throw new AppError("Produto não encontrado.", 404);
     return this.productRepository.update(productId, data);
   }
 
   async deactivateProduct(productId) {
     const existing = await this.productRepository.findByIdWithSizes(productId);
-    if (!existing) throw new AppError("Produto nao encontrado.", 404);
+    if (!existing) throw new AppError("Produto não encontrado.", 404);
     return this.productRepository.setActive(productId, false);
   }
 
@@ -42,7 +42,7 @@ export class ProductService {
 
   async deleteProduct(productId) {
     const existing = await this.productRepository.findByIdWithSizes(productId);
-    if (!existing) throw new AppError("Produto nao encontrado.", 404);
+    if (!existing) throw new AppError("Produto não encontrado.", 404);
 
     try {
       return await this.productRepository.deletePermanent(productId);
@@ -61,7 +61,7 @@ export class ProductService {
     const product = await this.productRepository.findByIdWithSizes(productId);
 
     if (!product) {
-      throw new AppError("Produto nao encontrado.", 404);
+      throw new AppError("Produto não encontrado.", 404);
     }
 
     return product;

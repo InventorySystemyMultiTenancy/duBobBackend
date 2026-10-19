@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const loginSchema = z.object({
-  identifier: z.string().min(1, "Email ou telefone obrigatorio"),
+  identifier: z.string().min(1, "Email ou telefone obrigatório"),
   password: z.string().min(6).max(100),
 });
 

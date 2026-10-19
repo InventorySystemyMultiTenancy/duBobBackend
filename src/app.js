@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import crypto from "crypto";
 import twilio from "twilio";
 import { AuthController } from "./controllers/AuthController.js";
 import { OrderController } from "./controllers/OrderController.js";
@@ -92,90 +93,101 @@ app.get("/health", (_req, res) => {
   return res.status(200).json({ status: "ok" });
 });
 
-app.post("/api/send-order-alert", async (req, res, next) => {
-  try {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const fromInput =
-      process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886";
-    const defaultTo = process.env.TWILIO_WHATSAPP_TO;
+// Envio manual de WhatsApp (Twilio) — somente ADMIN, para não expor a conta.
+app.post(
+  "/api/send-order-alert",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const accountSid = process.env.TWILIO_ACCOUNT_SID;
+      const authToken = process.env.TWILIO_AUTH_TOKEN;
+      const fromInput =
+        process.env.TWILIO_WHATSAPP_FROM || "whatsapp:+14155238886";
+      const defaultTo = process.env.TWILIO_WHATSAPP_TO;
 
-    if (!accountSid || !authToken) {
-      return res.status(500).json({
-        error: {
-          message:
-            "Defina TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN no arquivo .env.",
-        },
+      if (!accountSid || !authToken) {
+        return res.status(500).json({
+          error: {
+            message:
+              "Defina TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN no arquivo .env.",
+          },
+        });
+      }
+
+      const toInput = (req.body?.to || defaultTo || "").trim();
+      const body =
+        req.body?.message?.trim() ||
+        "Olá! Seu pedido da Dubob já está sendo preparado!";
+
+      if (!toInput) {
+        return res.status(400).json({
+          error: {
+            message:
+              "Informe o destino em req.body.to ou configure TWILIO_WHATSAPP_TO no .env.",
+          },
+        });
+      }
+
+      const to = toInput.startsWith("whatsapp:")
+        ? toInput
+        : `whatsapp:${toInput}`;
+      const from = fromInput.startsWith("whatsapp:")
+        ? fromInput
+        : `whatsapp:${fromInput}`;
+
+      const client = twilio(accountSid, authToken);
+      const message = await client.messages.create({
+        from,
+        to,
+        body,
       });
-    }
 
-    const toInput = (req.body?.to || defaultTo || "").trim();
-    const body =
-      req.body?.message?.trim() ||
-      "Ola! Seu pedido da Dubob ja esta sendo preparado!";
-
-    if (!toInput) {
-      return res.status(400).json({
-        error: {
-          message:
-            "Informe o destino em req.body.to ou configure TWILIO_WHATSAPP_TO no .env.",
-        },
+      return res.status(200).json({
+        ok: true,
+        message: "Mensagem enviada com sucesso.",
+        sid: message.sid,
+        status: message.status,
+        to,
+        from,
       });
+    } catch (err) {
+      return next(err);
     }
+  },
+);
 
-    const to = toInput.startsWith("whatsapp:")
-      ? toInput
-      : `whatsapp:${toInput}`;
-    const from = fromInput.startsWith("whatsapp:")
-      ? fromInput
-      : `whatsapp:${fromInput}`;
-
-    const client = twilio(accountSid, authToken);
-    const message = await client.messages.create({
-      from,
-      to,
-      body,
-    });
-
-    return res.status(200).json({
-      ok: true,
-      message: "Mensagem enviada com sucesso.",
-      sid: message.sid,
-      status: message.status,
-      to,
-      from,
-    });
-  } catch (err) {
-    return next(err);
-  }
-});
-
-app.get("/api/twilio/status/:sid", async (req, res, next) => {
-  try {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (!accountSid || !authToken) {
-      return res.status(500).json({ error: "Twilio credentials missing" });
+app.get(
+  "/api/twilio/status/:sid",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const accountSid = process.env.TWILIO_ACCOUNT_SID;
+      const authToken = process.env.TWILIO_AUTH_TOKEN;
+      if (!accountSid || !authToken) {
+        return res.status(500).json({ error: "Twilio credentials missing" });
+      }
+      const client = twilio(accountSid, authToken);
+      const message = await client.messages(req.params.sid).fetch();
+      return res.status(200).json({
+        ok: true,
+        sid: message.sid,
+        status: message.status,
+        to: message.to,
+        from: message.from,
+        body: message.body,
+        errorCode: message.errorCode ?? null,
+        errorMessage: message.errorMessage ?? null,
+        dateCreated: message.dateCreated,
+        dateSent: message.dateSent,
+        dateUpdated: message.dateUpdated,
+      });
+    } catch (err) {
+      return next(err);
     }
-    const client = twilio(accountSid, authToken);
-    const message = await client.messages(req.params.sid).fetch();
-    return res.status(200).json({
-      ok: true,
-      sid: message.sid,
-      status: message.status,
-      to: message.to,
-      from: message.from,
-      body: message.body,
-      errorCode: message.errorCode ?? null,
-      errorMessage: message.errorMessage ?? null,
-      dateCreated: message.dateCreated,
-      dateSent: message.dateSent,
-      dateUpdated: message.dateUpdated,
-    });
-  } catch (err) {
-    return next(err);
-  }
-});
+  },
+);
 
 // Public product routes
 app.get("/api/products", (req, res, next) =>
@@ -242,6 +254,40 @@ app.post("/api/auth/totem/guest", authLimiter, (req, res, next) =>
   authController.createTotemGuest(req, res, next),
 );
 
+// PIN de saída do totem / logout da mesa — validado no servidor para não
+// ficar exposto no JavaScript público do site.
+const EXIT_PIN_ENV = { totem: "TOTEM_EXIT_PIN", mesa: "MESA_LOGOUT_PIN" };
+const exitPinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: { message: "Muitas tentativas. Tente novamente em 15 minutos." },
+  },
+});
+const sha256 = (value) => crypto.createHash("sha256").update(value).digest();
+app.post("/api/auth/exit-pin", exitPinLimiter, (req, res) => {
+  const envKey = EXIT_PIN_ENV[req.body?.kind];
+  if (!envKey) {
+    return res.status(400).json({ error: { message: "Tipo de PIN inválido." } });
+  }
+
+  const expected = process.env[envKey];
+  if (!expected) {
+    return res.status(503).json({
+      error: { message: `PIN não configurado no servidor (${envKey}).` },
+    });
+  }
+
+  const pin = String(req.body?.pin ?? "");
+  if (!crypto.timingSafeEqual(sha256(pin), sha256(expected))) {
+    return res.status(401).json({ error: { message: "PIN incorreto." } });
+  }
+
+  return res.status(200).json({ ok: true });
+});
+
 app.post(
   "/api/auth/users",
   authenticateToken,
@@ -283,6 +329,7 @@ const deliveryService = new DeliveryService();
 app.post(
   "/api/delivery/calculate",
   authenticateToken,
+  authorizeRoles("CLIENTE", "ADMIN"),
   async (req, res, next) => {
     try {
       const { cep, numero, cidade, rua, complemento } =
@@ -558,7 +605,7 @@ app.get("/api/mesas/acesso/:token", (req, res, next) =>
 app.get(
   "/api/mesas",
   authenticateToken,
-  authorizeRoles("ADMIN", "ATENDENTE"),
+  authorizeRoles("ADMIN", "FUNCIONARIO", "ATENDENTE"),
   (req, res, next) => mesaController.list(req, res, next),
 );
 app.get(
@@ -634,7 +681,7 @@ app.get(
 app.post(
   "/api/comandas",
   authenticateToken,
-  authorizeRoles("ADMIN"),
+  authorizeRoles("ADMIN", "FUNCIONARIO", "ATENDENTE"),
   (req, res, next) => comandaController.create(req, res, next),
 );
 app.put(

@@ -379,7 +379,7 @@ export class OrderController {
         issues: error.issues,
         flattened: error.flatten(),
       });
-      return next(new AppError("Payload invalido.", 422, error.flatten()));
+      return next(new AppError("Payload inválido.", 422, error.flatten()));
     }
 
     if (error instanceof AppError) {

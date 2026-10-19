@@ -52,14 +52,14 @@ export const createProductSchema = z
     description: z.string().max(300).optional(),
     imageUrl: z
       .string()
-      .url("URL de imagem invalida")
+      .url("URL de imagem inválida")
       .optional()
       .or(z.literal("")),
     category: z.string().max(50).optional(),
     availableDays: z.array(availableDaySchema).optional(),
     waiterOnly: z.boolean().optional(),
     isCrust: z.boolean().optional(),
-    sizes: z.array(sizeSchema).min(1, "Informe ao menos um tamanho com preco"),
+    sizes: z.array(sizeSchema).min(1, "Informe ao menos um tamanho com preço"),
   })
   .superRefine(validatePricesByCategory);
 
@@ -69,7 +69,7 @@ export const updateProductSchema = z
     description: z.string().max(300).optional(),
     imageUrl: z
       .string()
-      .url("URL de imagem invalida")
+      .url("URL de imagem inválida")
       .optional()
       .or(z.literal("")),
     category: z.string().max(50).optional(),

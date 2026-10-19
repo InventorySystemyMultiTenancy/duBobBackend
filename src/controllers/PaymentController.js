@@ -20,13 +20,13 @@ export class PaymentController {
       const { orderId } = req.body;
 
       if (!orderId) {
-        throw new AppError("orderId obrigatorio.", 422);
+        throw new AppError("orderId obrigatório.", 422);
       }
 
       const order = await orderRepository.findById(orderId);
 
       if (!order) {
-        throw new AppError("Pedido nao encontrado.", 404);
+        throw new AppError("Pedido não encontrado.", 404);
       }
 
       if (order.userId !== req.user.id && req.user.role !== "ADMIN") {
@@ -35,7 +35,7 @@ export class PaymentController {
 
       const accessToken = process.env.MP_ACCESS_TOKEN;
       if (!accessToken) {
-        throw new AppError("Mercado Pago nao configurado.", 500);
+        throw new AppError("Mercado Pago não configurado.", 500);
       }
 
       const client = new MercadoPagoConfig({ accessToken });
@@ -86,10 +86,10 @@ export class PaymentController {
     try {
       const { orderId } = req.body;
 
-      if (!orderId) throw new AppError("orderId obrigatorio.", 422);
+      if (!orderId) throw new AppError("orderId obrigatório.", 422);
 
       const order = await orderRepository.findById(orderId);
-      if (!order) throw new AppError("Pedido nao encontrado.", 404);
+      if (!order) throw new AppError("Pedido não encontrado.", 404);
 
       // Apenas a propria mesa ou admin pode iniciar o pagamento
       const isMesa = req.user.role === "MESA";
@@ -106,11 +106,11 @@ export class PaymentController {
       }
 
       if (order.paymentStatus === "APROVADO") {
-        throw new AppError("Pedido ja pago.", 409);
+        throw new AppError("Pedido já pago.", 409);
       }
 
       const mpToken = process.env.MP_ACCESS_TOKEN;
-      if (!mpToken) throw new AppError("Mercado Pago nao configurado.", 500);
+      if (!mpToken) throw new AppError("Mercado Pago não configurado.", 500);
 
       const client = new MercadoPagoConfig({ accessToken: mpToken });
       const paymentApi = new MPPayment(client);
@@ -149,13 +149,13 @@ export class PaymentController {
     try {
       const { orderId } = req.body;
 
-      if (!orderId) throw new AppError("orderId obrigatorio.", 422);
+      if (!orderId) throw new AppError("orderId obrigatório.", 422);
 
       const order = await orderRepository.findById(orderId);
-      if (!order) throw new AppError("Pedido nao encontrado.", 404);
+      if (!order) throw new AppError("Pedido não encontrado.", 404);
 
       if (!order.mesaId) {
-        throw new AppError("Pedido nao vinculado a uma mesa.", 422);
+        throw new AppError("Pedido não vinculado a uma mesa.", 422);
       }
 
       const isMesa = req.user.role === "MESA";
@@ -172,7 +172,7 @@ export class PaymentController {
       }
 
       if (order.paymentStatus === "APROVADO") {
-        throw new AppError("Pedido ja pago.", 409);
+        throw new AppError("Pedido já pago.", 409);
       }
 
       // Se já existe um terminalIntentId salvo, cancela a cobrança anterior
@@ -219,7 +219,7 @@ export class PaymentController {
       }
 
       const mpToken = process.env.MP_ACCESS_TOKEN;
-      if (!mpToken) throw new AppError("Mercado Pago nao configurado.", 500);
+      if (!mpToken) throw new AppError("Mercado Pago não configurado.", 500);
 
       // Nova API unificada do MP Point: POST /v1/orders
       // external_reference fica na raiz e é propagado ao webhook automaticamente.
@@ -314,17 +314,17 @@ export class PaymentController {
     try {
       const { orderId, totemId, totemSlug } = req.body;
 
-      if (!orderId) throw new AppError("orderId obrigatorio.", 422);
+      if (!orderId) throw new AppError("orderId obrigatório.", 422);
 
       const order = await orderRepository.findById(orderId);
-      if (!order) throw new AppError("Pedido nao encontrado.", 404);
+      if (!order) throw new AppError("Pedido não encontrado.", 404);
 
       if (order.userId !== req.user.id && req.user.role !== "ADMIN") {
         throw new AppError("Acesso negado.", 403);
       }
 
       if (order.paymentStatus === "APROVADO") {
-        throw new AppError("Pedido ja pago.", 409);
+        throw new AppError("Pedido já pago.", 409);
       }
 
       if (order.terminalIntentId) {
@@ -346,7 +346,7 @@ export class PaymentController {
             if (!cancelResp.ok) {
               const errBody = await cancelResp.json().catch(() => ({}));
               console.warn(
-                "[createTotemTerminalPayment] Nao foi possivel cancelar intent anterior:",
+                "[createTotemTerminalPayment] Não foi possivel cancelar intent anterior:",
                 errBody?.message,
               );
             }
@@ -375,7 +375,7 @@ export class PaymentController {
       if (!terminalId) throw new AppError("Totem sem maquininha configurada.", 422);
 
       const mpToken = process.env.MP_ACCESS_TOKEN;
-      if (!mpToken) throw new AppError("Mercado Pago nao configurado.", 500);
+      if (!mpToken) throw new AppError("Mercado Pago não configurado.", 500);
 
       const orderBody = {
         type: "point",

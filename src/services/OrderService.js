@@ -233,15 +233,15 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
 
     if (!order) {
-      throw new AppError("Pedido nao encontrado.", 404);
+      throw new AppError("Pedido não encontrado.", 404);
     }
 
     if (order.status === "ENTREGUE") {
-      throw new AppError("Pedido ja entregue nao pode ser cancelado.", 409);
+      throw new AppError("Pedido já entregue não pode ser cancelado.", 409);
     }
 
     if (order.status === "CANCELADO") {
-      throw new AppError("Pedido ja esta cancelado.", 409);
+      throw new AppError("Pedido já está cancelado.", 409);
     }
 
     const updatedOrder = await this.orderRepository.updateStatus(
@@ -264,7 +264,7 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
 
     if (!order) {
-      throw new AppError("Pedido nao encontrado.", 404);
+      throw new AppError("Pedido não encontrado.", 404);
     }
 
     if (order.status === nextStatus) {
@@ -664,7 +664,7 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
 
     if (!order) {
-      throw new AppError("Pedido nao encontrado para o webhook recebido.", 404);
+      throw new AppError("Pedido não encontrado para o webhook recebido.", 404);
     }
 
     await this.paymentRepository.upsertFromWebhook({
@@ -1146,7 +1146,7 @@ export class OrderService {
     const order = await this.orderRepository.findById(orderId);
 
     if (!order) {
-      throw new AppError("Pedido nao encontrado.", 404);
+      throw new AppError("Pedido não encontrado.", 404);
     }
 
     return order;
@@ -1193,7 +1193,7 @@ export class OrderService {
       if (err.message === "CODE_INVALID")
         throw new AppError("Código inválido.", 400);
       if (err.message === "STATUS_INVALID")
-        throw new AppError("Pedido nao esta em transito.", 400);
+        throw new AppError("Pedido não está em trânsito.", 400);
       if (err.message === "IS_PICKUP")
         throw new AppError("Pedido de retirada não usa código.", 400);
       throw err;
@@ -1249,7 +1249,7 @@ export class OrderService {
 
   async deleteOrder(orderId, userId) {
     const row = await this.orderRepository.findOwnerAndStatus(orderId);
-    if (!row) throw new AppError("Pedido nao encontrado.", 404);
+    if (!row) throw new AppError("Pedido não encontrado.", 404);
     if (row.userId !== userId) throw new AppError("Acesso negado.", 403);
     if (row.status !== "CANCELADO") {
       throw new AppError(
@@ -1323,12 +1323,12 @@ export class OrderService {
     });
 
     if (!product) {
-      throw new AppError("Produto invalido ou inativo.", 422);
+      throw new AppError("Produto inválido ou inativo.", 422);
     }
 
     const basePrice = product.sizes?.[0]?.price;
     if (basePrice == null) {
-      throw new AppError("Produto sem preco configurado.", 422);
+      throw new AppError("Produto sem preço configurado.", 422);
     }
 
     const addonIds = [...new Set(item.addonIds ?? [])];
@@ -1346,7 +1346,7 @@ export class OrderService {
       });
 
       if (addonRows.length !== addonIds.length) {
-        throw new AppError("Um ou mais adicionais sao invalidos.", 422);
+        throw new AppError("Um ou mais adicionais são inválidos.", 422);
       }
 
       addons = addonRows.map((addon) => ({

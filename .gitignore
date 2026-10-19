@@ -24,3 +24,7 @@ Thumbs.db
 .idea/
 *.suo
 *.sw?
+
+# Dumps/backup do banco (contêm dados de clientes)
+*.dump
+*.sql.gz

@@ -22,7 +22,7 @@ const itemSchema = z
     if (uniqueCount !== item.addonIds.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "addonIds nao pode conter IDs repetidos.",
+        message: "addonIds não pode conter IDs repetidos.",
         path: ["addonIds"],
       });
     }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const amountSchema = z.coerce
-  .number({ invalid_type_error: "Valor invalido." })
+  .number({ invalid_type_error: "Valor inválido." })
   .positive("Valor precisa ser maior que zero.")
   .max(999999.99, "Valor muito alto.");
 
@@ -10,11 +10,11 @@ const optionalDateSchema = z
   .trim()
   .optional()
   .refine((value) => !value || !Number.isNaN(new Date(value).getTime()), {
-    message: "Data invalida.",
+    message: "Data inválida.",
   });
 
 export const createExpenseSchema = z.object({
-  name: z.string().trim().min(1, "Nome obrigatorio.").max(120),
+  name: z.string().trim().min(1, "Nome obrigatório.").max(120),
   category: z.string().trim().min(1, "Categoria obrigatoria.").max(80),
   observation: z.string().trim().max(500).optional().or(z.literal("")),
   amount: amountSchema,

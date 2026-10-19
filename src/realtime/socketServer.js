@@ -31,7 +31,7 @@ export function initializeSocketServer(server) {
       const token = socket.handshake.auth?.token;
 
       if (!token) {
-        return next(new Error("Token nao fornecido."));
+        return next(new Error("Token não fornecido."));
       }
 
       const payload = jwt.verify(token, process.env.JWT_SECRET);
@@ -44,7 +44,7 @@ export function initializeSocketServer(server) {
 
       return next();
     } catch {
-      return next(new Error("Token invalido ou expirado."));
+      return next(new Error("Token inválido ou expirado."));
     }
   });
 

@@ -9,7 +9,7 @@ export const authenticateToken = (req, _res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader?.startsWith("Bearer ")) {
-      throw new AppError("Token nao fornecido.", 401);
+      throw new AppError("Token não fornecido.", 401);
     }
 
     const token = authHeader.split(" ")[1];
@@ -27,7 +27,7 @@ export const authenticateToken = (req, _res, next) => {
       return next(error);
     }
 
-    return next(new AppError("Token invalido ou expirado.", 401));
+    return next(new AppError("Token inválido ou expirado.", 401));
   }
 };
 
@@ -35,7 +35,7 @@ export const authorizeRoles =
   (...allowedRoles) =>
   (req, _res, next) => {
     if (!req.user?.role) {
-      return next(new AppError("Usuario nao autenticado.", 401));
+      return next(new AppError("Usuário não autenticado.", 401));
     }
 
     if (!allowedRoles.includes(req.user.role)) {
@@ -50,7 +50,7 @@ export const enforceOrderOwnership = async (req, _res, next) => {
     const orderId = req.params.orderId || req.params.id;
 
     if (!orderId) {
-      throw new AppError("orderId nao informado.", 400);
+      throw new AppError("orderId não informado.", 400);
     }
 
     if (
@@ -67,13 +67,13 @@ export const enforceOrderOwnership = async (req, _res, next) => {
     const order = await orderRepository.findByIdWithUser(orderId);
 
     if (!order) {
-      throw new AppError("Pedido nao encontrado.", 404);
+      throw new AppError("Pedido não encontrado.", 404);
     }
 
     if (req.user.role === "MESA") {
       if (order.mesaId !== req.user.id) {
         throw new AppError(
-          "Voce nao tem permissao para acessar este pedido.",
+          "Você não tem permissão para acessar este pedido.",
           403,
         );
       }
@@ -81,12 +81,12 @@ export const enforceOrderOwnership = async (req, _res, next) => {
     }
 
     if (req.user.role !== "CLIENTE") {
-      throw new AppError("Perfil sem permissao para acessar pedido.", 403);
+      throw new AppError("Perfil sem permissão para acessar pedido.", 403);
     }
 
     if (!order.user || order.user.id !== req.user.id) {
       throw new AppError(
-        "Voce nao tem permissao para acessar este pedido.",
+        "Você não tem permissão para acessar este pedido.",
         403,
       );
     }

@@ -20,7 +20,7 @@ export class ComandaService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === "P2002"
       ) {
-        throw new AppError("Numero de comanda ja cadastrado.", 409);
+        throw new AppError("Número de comanda já cadastrado.", 409);
       }
       throw err;
     }
@@ -36,7 +36,7 @@ export class ComandaService {
 
   async update(id, data) {
     const comanda = await this.comandaRepository.findById(id);
-    if (!comanda) throw new AppError("Comanda nao encontrada.", 404);
+    if (!comanda) throw new AppError("Comanda não encontrada.", 404);
 
     try {
       return await this.comandaRepository.update(id, data);
@@ -45,7 +45,7 @@ export class ComandaService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === "P2002"
       ) {
-        throw new AppError("Numero de comanda ja cadastrado.", 409);
+        throw new AppError("Número de comanda já cadastrado.", 409);
       }
       throw err;
     }
@@ -53,26 +53,26 @@ export class ComandaService {
 
   async delete(id) {
     const comanda = await this.comandaRepository.findById(id);
-    if (!comanda) throw new AppError("Comanda nao encontrada.", 404);
+    if (!comanda) throw new AppError("Comanda não encontrada.", 404);
     return this.comandaRepository.delete(id);
   }
 
   async regenerateToken(id) {
     const comanda = await this.comandaRepository.findById(id);
-    if (!comanda) throw new AppError("Comanda nao encontrada.", 404);
+    if (!comanda) throw new AppError("Comanda não encontrada.", 404);
     return this.comandaRepository.update(id, { accessToken: randomUUID() });
   }
 
   async getOrdersToday(id) {
     const comanda = await this.comandaRepository.findById(id);
-    if (!comanda) throw new AppError("Comanda nao encontrada.", 404);
+    if (!comanda) throw new AppError("Comanda não encontrada.", 404);
     return this.comandaRepository.findOrdersToday(id);
   }
 
   async getSummaryByToken(token) {
     const summary = await this.comandaRepository.findSummaryByToken(token);
     if (!summary || !summary.comanda?.isActive) {
-      throw new AppError("Comanda nao encontrada ou inativa.", 404);
+      throw new AppError("Comanda não encontrada ou inativa.", 404);
     }
     return summary;
   }

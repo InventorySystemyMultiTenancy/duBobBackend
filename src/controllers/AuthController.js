@@ -17,7 +17,7 @@ export class AuthController {
       const user = await authService.register(payload, null);
 
       return res.status(201).json({
-        message: "Usuario criado com sucesso.",
+        message: "Usuário criado com sucesso.",
         data: user,
       });
     } catch (error) {
@@ -31,7 +31,7 @@ export class AuthController {
       const user = await authService.register(payload, req.user);
 
       return res.status(201).json({
-        message: "Usuario da equipe criado com sucesso.",
+        message: "Usuário da equipe criado com sucesso.",
         data: user,
       });
     } catch (error) {
@@ -73,7 +73,7 @@ export class AuthController {
       const result = await authService.createTotemGuest(payload);
 
       return res.status(201).json({
-        message: "Cliente temporario criado com sucesso.",
+        message: "Cliente temporário criado com sucesso.",
         data: result,
       });
     } catch (error) {
@@ -83,7 +83,7 @@ export class AuthController {
 
   #handleError(error, next) {
     if (error instanceof ZodError) {
-      return next(new AppError("Payload invalido.", 422, error.flatten()));
+      return next(new AppError("Payload inválido.", 422, error.flatten()));
     }
 
     return next(error);

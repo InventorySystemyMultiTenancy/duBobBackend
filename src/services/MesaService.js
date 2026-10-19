@@ -20,7 +20,7 @@ export class MesaService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === "P2002"
       ) {
-        throw new AppError("Numero de mesa ja cadastrado.", 409);
+        throw new AppError("Número de mesa já cadastrado.", 409);
       }
       throw err;
     }
@@ -36,7 +36,7 @@ export class MesaService {
 
   async update(id, data) {
     const mesa = await this.mesaRepository.findById(id);
-    if (!mesa) throw new AppError("Mesa nao encontrada.", 404);
+    if (!mesa) throw new AppError("Mesa não encontrada.", 404);
     try {
       return await this.mesaRepository.update(id, data);
     } catch (err) {
@@ -44,7 +44,7 @@ export class MesaService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === "P2002"
       ) {
-        throw new AppError("Numero de mesa ja cadastrado.", 409);
+        throw new AppError("Número de mesa já cadastrado.", 409);
       }
       throw err;
     }
@@ -52,13 +52,13 @@ export class MesaService {
 
   async delete(id) {
     const mesa = await this.mesaRepository.findById(id);
-    if (!mesa) throw new AppError("Mesa nao encontrada.", 404);
+    if (!mesa) throw new AppError("Mesa não encontrada.", 404);
     return this.mesaRepository.delete(id);
   }
 
   async regenerateToken(id) {
     const mesa = await this.mesaRepository.findById(id);
-    if (!mesa) throw new AppError("Mesa nao encontrada.", 404);
+    if (!mesa) throw new AppError("Mesa não encontrada.", 404);
     const { randomUUID } = await import("crypto");
     return this.mesaRepository.update(id, { accessToken: randomUUID() });
   }
@@ -66,7 +66,7 @@ export class MesaService {
   async access(token) {
     const mesa = await this.mesaRepository.findByAccessToken(token);
     if (!mesa || !mesa.isActive) {
-      throw new AppError("Mesa nao encontrada ou inativa.", 404);
+      throw new AppError("Mesa não encontrada ou inativa.", 404);
     }
 
     const accessToken = jwt.sign(

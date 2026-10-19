@@ -29,7 +29,7 @@ export class TotemService {
       });
     } catch (err) {
       if (isUniqueError(err)) {
-        throw new AppError("Numero de totem ja cadastrado.", 409);
+        throw new AppError("Número de totem já cadastrado.", 409);
       }
       throw err;
     }
@@ -42,7 +42,7 @@ export class TotemService {
   async getPublicBySlug(slug) {
     const totem = await this.totemRepository.findBySlug(slug);
     if (!totem || !totem.isActive) {
-      throw new AppError("Totem nao encontrado ou inativo.", 404);
+      throw new AppError("Totem não encontrado ou inativo.", 404);
     }
     return totem;
   }
@@ -53,7 +53,7 @@ export class TotemService {
       : await this.totemRepository.findBySlug(totemSlug);
 
     if (!totem || !totem.isActive) {
-      throw new AppError("Totem nao encontrado ou inativo.", 404);
+      throw new AppError("Totem não encontrado ou inativo.", 404);
     }
     if (!totem.terminalId) {
       throw new AppError("Totem sem maquininha configurada.", 422);
@@ -63,7 +63,7 @@ export class TotemService {
 
   async update(id, data) {
     const totem = await this.totemRepository.findById(id);
-    if (!totem) throw new AppError("Totem nao encontrado.", 404);
+    if (!totem) throw new AppError("Totem não encontrado.", 404);
     const payload = { ...data };
     if (data.number) payload.slug = this.buildSlug(data.number);
 
@@ -71,7 +71,7 @@ export class TotemService {
       return await this.totemRepository.update(id, payload);
     } catch (err) {
       if (isUniqueError(err)) {
-        throw new AppError("Numero de totem ja cadastrado.", 409);
+        throw new AppError("Número de totem já cadastrado.", 409);
       }
       throw err;
     }
@@ -79,7 +79,7 @@ export class TotemService {
 
   async delete(id) {
     const totem = await this.totemRepository.findById(id);
-    if (!totem) throw new AppError("Totem nao encontrado.", 404);
+    if (!totem) throw new AppError("Totem não encontrado.", 404);
     return this.totemRepository.delete(id);
   }
 }
