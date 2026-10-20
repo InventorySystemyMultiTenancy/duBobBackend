@@ -324,6 +324,22 @@ app.get(
   (req, res, next) => orderController.motoboyOrders(req, res, next),
 );
 
+// Motoboy envia a própria posição (repassada ao cliente via socket)
+app.post(
+  "/api/motoboy/location",
+  authenticateToken,
+  authorizeRoles("MOTOBOY"),
+  (req, res, next) => orderController.updateMotoboyLocation(req, res, next),
+);
+
+// Cliente consulta onde está o motoboy do seu pedido
+app.get(
+  "/api/orders/:orderId/motoboy-location",
+  authenticateToken,
+  authorizeRoles("CLIENTE", "ADMIN", "FUNCIONARIO", "ATENDENTE"),
+  (req, res, next) => orderController.motoboyLocation(req, res, next),
+);
+
 // Cálculo de frete (Nominatim + OSRM)
 const deliveryService = new DeliveryService();
 app.post(

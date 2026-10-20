@@ -8,6 +8,7 @@ import { ExpenseService } from "./ExpenseService.js";
 import { DeliveryService } from "./DeliveryService.js";
 import {
   emitOrderCreated,
+  emitMotoboyLocation,
   emitOrderStatusUpdated,
   emitPaymentUpdated,
 } from "../realtime/socketServer.js";
@@ -31,6 +32,26 @@ const PAYMENT_STATUS_MAP = {
 };
 
 const deliveryService = new DeliveryService();
+
+// Última posição conhecida de cada motoboy (só em memória: some ao reiniciar,
+// e o celular do motoboy reenvia em poucos segundos).
+const motoboyLocations = new Map();
+const MOTOBOY_LOCATION_TTL_MS = 5 * 60 * 1000;
+
+const getFreshMotoboyLocation = (motoboyId) => {
+  const location = motoboyLocations.get(motoboyId);
+  if (!location) return null;
+  if (Date.now() - new Date(location.updatedAt).getTime() > MOTOBOY_LOCATION_TTL_MS) {
+    motoboyLocations.delete(motoboyId);
+    return null;
+  }
+  return location;
+};
+
+const isTrackableDelivery = (order) =>
+  order?.status === "SAIU_PARA_ENTREGA" &&
+  !order.isPickup &&
+  Boolean(order.assignedMotoboyId);
 
 const toCents = (value) => Math.round(Number(value) * 100);
 const fromCents = (value) => (value / 100).toFixed(2);
@@ -818,6 +839,72 @@ export class OrderService {
         travelFromMotoboy: fromOriginById.get(order.id) ?? null,
       })),
     );
+  }
+
+  /**
+   * Recebe a posição do motoboy e repassa, com o tempo estimado, para os
+   * clientes dos pedidos que ele está entregando.
+   */
+  async updateMotoboyLocation(user, { lat, lon }) {
+    const location = { lat, lon, updatedAt: new Date().toISOString() };
+    motoboyLocations.set(user.id, location);
+
+    const orders = (
+      await this.orderRepository.findForMotoboy({ assignedMotoboyId: user.id })
+    ).filter(
+      (order) =>
+        !order.isPickup &&
+        order.deliveryLat != null &&
+        order.deliveryLon != null,
+    );
+
+    const travels = await deliveryService.estimateTravelFrom(
+      { lat, lon },
+      orders.map((order) => ({ lat: order.deliveryLat, lon: order.deliveryLon })),
+    );
+
+    orders.forEach((order, i) => {
+      emitMotoboyLocation({
+        orderId: order.id,
+        userId: order.userId,
+        ...location,
+        travel: travels[i] ?? null,
+      });
+    });
+
+    return { notifiedOrders: orders.length };
+  }
+
+  /** Posição atual do motoboy de um pedido em entrega (para o cliente). */
+  async getOrderMotoboyLocation(orderId, user) {
+    const order = await this.orderRepository.findById(orderId);
+    if (!order) throw new AppError("Pedido não encontrado.", 404);
+
+    if (user?.role === "CLIENTE" && order.userId !== user.id) {
+      throw new AppError("Pedido não encontrado.", 404);
+    }
+
+    if (!isTrackableDelivery(order)) return null;
+
+    const location = getFreshMotoboyLocation(order.assignedMotoboyId);
+    if (!location) return null;
+
+    let travel = null;
+    if (order.deliveryLat != null && order.deliveryLon != null) {
+      [travel] = await deliveryService.estimateTravelFrom(location, [
+        { lat: order.deliveryLat, lon: order.deliveryLon },
+      ]);
+    }
+
+    return {
+      orderId: order.id,
+      ...location,
+      destination:
+        order.deliveryLat != null && order.deliveryLon != null
+          ? { lat: order.deliveryLat, lon: order.deliveryLon }
+          : null,
+      travel,
+    };
   }
 
   async listActiveOrders(user) {

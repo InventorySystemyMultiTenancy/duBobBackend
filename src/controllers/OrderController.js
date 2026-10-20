@@ -143,6 +143,40 @@ export class OrderController {
     }
   }
 
+  async updateMotoboyLocation(req, res, next) {
+    try {
+      const lat = Number(req.body?.lat);
+      const lon = Number(req.body?.lon);
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lon) ||
+        Math.abs(lat) > 90 ||
+        Math.abs(lon) > 180
+      ) {
+        throw new AppError("Localização inválida.", 422);
+      }
+      const result = await orderService.updateMotoboyLocation(req.user, {
+        lat,
+        lon,
+      });
+      return res.status(200).json({ data: result });
+    } catch (error) {
+      return this.#handleError(error, next);
+    }
+  }
+
+  async motoboyLocation(req, res, next) {
+    try {
+      const location = await orderService.getOrderMotoboyLocation(
+        req.params.orderId,
+        req.user,
+      );
+      return res.status(200).json({ data: location });
+    } catch (error) {
+      return this.#handleError(error, next);
+    }
+  }
+
   async history(req, res, next) {
     try {
       const { clientName, dateFrom, dateTo } = req.query;

@@ -90,3 +90,10 @@ export function emitChamarGarcom(payload) {
   if (!ioInstance) return;
   ioInstance.to("staff").emit("mesa:chamar-garcom", payload);
 }
+
+// Posição do motoboy: vai só para o cliente dono do pedido (não para "staff",
+// senão todos os motoboys receberiam a localização uns dos outros).
+export function emitMotoboyLocation(payload) {
+  if (!ioInstance || !payload.userId) return;
+  ioInstance.to(`user:${payload.userId}`).emit("order:motoboy-location", payload);
+}
