@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { ZodError } from "zod";
 import { AppError } from "../errors/AppError.js";
 import { OrderService } from "../services/OrderService.js";
+import { STORE_LAT, STORE_LON } from "../services/DeliveryService.js";
 import {
   createOrderSchema,
   paymentWebhookSchema,
@@ -121,8 +122,22 @@ export class OrderController {
 
   async motoboyOrders(req, res, next) {
     try {
-      const orders = await orderService.listMotoboyOrders(req.user);
-      return res.status(200).json({ data: orders });
+      const lat = Number(req.query.lat);
+      const lon = Number(req.query.lon);
+      const hasOrigin =
+        req.query.lat != null &&
+        req.query.lon != null &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        Math.abs(lat) <= 90 &&
+        Math.abs(lon) <= 180;
+      const orders = await orderService.listMotoboyOrders(
+        req.user,
+        hasOrigin ? { lat, lon } : null,
+      );
+      return res
+        .status(200)
+        .json({ data: orders, store: { lat: STORE_LAT, lon: STORE_LON } });
     } catch (error) {
       return this.#handleError(error, next);
     }

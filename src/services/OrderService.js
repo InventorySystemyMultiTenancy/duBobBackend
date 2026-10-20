@@ -5,6 +5,7 @@ import { prisma } from "../lib/prisma.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { PaymentRepository } from "../repositories/PaymentRepository.js";
 import { ExpenseService } from "./ExpenseService.js";
+import { DeliveryService } from "./DeliveryService.js";
 import {
   emitOrderCreated,
   emitOrderStatusUpdated,
@@ -28,6 +29,8 @@ const PAYMENT_STATUS_MAP = {
   in_process: "PENDENTE",
   pending: "PENDENTE",
 };
+
+const deliveryService = new DeliveryService();
 
 const toCents = (value) => Math.round(Number(value) * 100);
 const fromCents = (value) => (value / 100).toFixed(2);
@@ -782,14 +785,37 @@ export class OrderService {
     return this.orderRepository.findByUserId(userId);
   }
 
-  async listMotoboyOrders(user) {
-    if (user?.role === "MOTOBOY") {
-      return this.orderRepository.findForMotoboy({
-        assignedMotoboyId: user.id,
-      });
-    }
+  async listMotoboyOrders(user, origin = null) {
+    const orders = await this.orderRepository.findForMotoboy(
+      user?.role === "MOTOBOY" ? { assignedMotoboyId: user.id } : {},
+    );
 
-    return this.orderRepository.findForMotoboy();
+    const withCoords = orders.filter(
+      (order) => order.deliveryLat != null && order.deliveryLon != null,
+    );
+    const fromOrigin = origin
+      ? await deliveryService.estimateTravelFrom(
+          origin,
+          withCoords.map((order) => ({
+            lat: order.deliveryLat,
+            lon: order.deliveryLon,
+          })),
+        )
+      : [];
+    const fromOriginById = new Map(
+      withCoords.map((order, i) => [order.id, fromOrigin[i] ?? null]),
+    );
+
+    return Promise.all(
+      orders.map(async (order) => ({
+        ...order,
+        travel: await deliveryService.estimateTravel(
+          order.deliveryLat,
+          order.deliveryLon,
+        ),
+        travelFromMotoboy: fromOriginById.get(order.id) ?? null,
+      })),
+    );
   }
 
   async listActiveOrders(user) {
