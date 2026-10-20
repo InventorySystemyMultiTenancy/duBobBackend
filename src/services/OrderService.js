@@ -315,6 +315,8 @@ export class OrderService {
       userId: order.userId,
       previousStatus: order.status,
       status: updatedOrder.status,
+      isPickup: Boolean(order.isPickup),
+      mesaId: order.mesaId ?? null,
     });
 
     return updatedOrder;
