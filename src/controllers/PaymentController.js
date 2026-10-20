@@ -64,7 +64,7 @@ export class PaymentController {
             pending: `${frontendUrl}/checkout/retorno`,
           },
           auto_return: "approved",
-          notification_url: `${process.env.BACKEND_URL || "https://dubob-backend.onrender.com"}/api/payments/webhook`,
+          notification_url: `${process.env.BACKEND_URL || "https://dubobbackend.onrender.com"}/api/payments/webhook`,
           statement_descriptor: "DUBOB",
         },
       });
@@ -124,7 +124,7 @@ export class PaymentController {
           },
           description: `Pedido Mesa #${order.id.slice(-6).toUpperCase()}`,
           external_reference: order.id,
-          notification_url: `${process.env.BACKEND_URL || "https://dubob-backend.onrender.com"}/api/payments/webhook`,
+          notification_url: `${process.env.BACKEND_URL || "https://dubobbackend.onrender.com"}/api/payments/webhook`,
         },
       });
 
