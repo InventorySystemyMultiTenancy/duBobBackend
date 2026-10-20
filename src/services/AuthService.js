@@ -20,15 +20,16 @@ export class AuthService {
   }
 
   #buildClientSession(user) {
-    // A TV fica ligada o dia todo no telão: sessão longa para não deslogar.
-    const expiresIn =
-      user.role === "TV"
-        ? process.env.TV_JWT_EXPIRES_IN || "30d"
-        : process.env.JWT_EXPIRES_IN || "8h";
+    // Só o cliente tem sessão com prazo (7 dias). A equipe (admin, cozinha,
+    // TV, motoboy...) fica logada até clicar em "Sair".
+    const options = { subject: user.id };
+    if (user.role === "CLIENTE") {
+      options.expiresIn = process.env.CLIENT_JWT_EXPIRES_IN || "7d";
+    }
     const token = jwt.sign(
       { role: user.role, email: user.email || null },
       process.env.JWT_SECRET,
-      { subject: user.id, expiresIn },
+      options,
     );
 
     return {
