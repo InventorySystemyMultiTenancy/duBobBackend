@@ -31,6 +31,10 @@ async function runMigrations() {
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "deliveryCode" TEXT`,
     `ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS "notes" TEXT`,
     `ALTER TABLE "ProductSize" ADD COLUMN IF NOT EXISTS "label" TEXT`,
+    // Adicional do açaí (do 5º ao 8º complemento) cobrado dentro do mesmo item.
+    `INSERT INTO "Addon" ("id", "name", "price", "isActive", "createdAt", "updatedAt")
+      VALUES ('db_addon_acai_extra_complementos', '4 complementos extras', 5.00, true, NOW(), NOW())
+      ON CONFLICT ("id") DO NOTHING`,
     `DO $$
       BEGIN
         IF NOT EXISTS (
