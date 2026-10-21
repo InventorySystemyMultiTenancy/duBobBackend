@@ -232,6 +232,7 @@ model Totem {
   slug        String   @unique
   terminalId  String?
   isActive    Boolean  @default(true)
+  voiceEnabled Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

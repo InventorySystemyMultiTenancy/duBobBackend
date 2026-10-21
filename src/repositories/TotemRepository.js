@@ -10,6 +10,7 @@ function mapTotem(row) {
     slug: row.slug,
     terminalId: row.terminalId,
     isActive: row.isActive,
+    voiceEnabled: Boolean(row.voiceEnabled),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -36,13 +37,17 @@ export class TotemRepository {
     await prisma.$executeRaw`
       CREATE UNIQUE INDEX IF NOT EXISTS "Totem_slug_key" ON "Totem"("slug")
     `;
+    // Voz do totem (fala as perguntas do pedido); ligada pelo admin.
+    await prisma.$executeRaw`
+      ALTER TABLE "Totem" ADD COLUMN IF NOT EXISTS "voiceEnabled" BOOLEAN NOT NULL DEFAULT false
+    `;
   }
 
-  async create({ name, number, slug, terminalId }) {
+  async create({ name, number, slug, terminalId, voiceEnabled = false }) {
     await this.ensureTable();
     const rows = await prisma.$queryRaw`
-      INSERT INTO "Totem" ("id", "name", "number", "slug", "terminalId", "updatedAt")
-      VALUES (${randomUUID()}, ${name}, ${number}, ${slug}, ${terminalId}, NOW())
+      INSERT INTO "Totem" ("id", "name", "number", "slug", "terminalId", "voiceEnabled", "updatedAt")
+      VALUES (${randomUUID()}, ${name}, ${number}, ${slug}, ${terminalId}, ${voiceEnabled}, NOW())
       RETURNING *
     `;
     return mapTotem(rows[0]);
@@ -89,6 +94,10 @@ export class TotemRepository {
         Object.prototype.hasOwnProperty.call(data, "isActive")
           ? data.isActive
           : current.isActive,
+      voiceEnabled:
+        Object.prototype.hasOwnProperty.call(data, "voiceEnabled")
+          ? data.voiceEnabled
+          : current.voiceEnabled,
     };
 
     const rows = await prisma.$queryRaw`
@@ -99,6 +108,7 @@ export class TotemRepository {
         "slug" = ${next.slug},
         "terminalId" = ${next.terminalId},
         "isActive" = ${next.isActive},
+        "voiceEnabled" = ${next.voiceEnabled},
         "updatedAt" = NOW()
       WHERE "id" = ${id}
       RETURNING *

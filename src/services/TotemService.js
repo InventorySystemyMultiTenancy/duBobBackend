@@ -19,13 +19,14 @@ export class TotemService {
     return `totem${number}`;
   }
 
-  async create({ name, number, terminalId }) {
+  async create({ name, number, terminalId, voiceEnabled }) {
     try {
       return await this.totemRepository.create({
         name,
         number,
         slug: this.buildSlug(number),
         terminalId: terminalId ?? null,
+        voiceEnabled: voiceEnabled ?? false,
       });
     } catch (err) {
       if (isUniqueError(err)) {

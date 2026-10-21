@@ -37,6 +37,7 @@ export class TotemController {
           name: totem.name,
           number: totem.number,
           slug: totem.slug,
+          voiceEnabled: totem.voiceEnabled,
         },
       });
     } catch (error) {
