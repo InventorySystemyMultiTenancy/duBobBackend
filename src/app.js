@@ -583,6 +583,13 @@ app.post(
   (req, res, next) => paymentController.createTotemTerminalPayment(req, res, next),
 );
 
+app.post(
+  "/api/totem/payments/cancel",
+  authenticateToken,
+  authorizeRoles("CLIENTE", "ADMIN"),
+  (req, res, next) => paymentController.cancelTotemTerminalPayment(req, res, next),
+);
+
 app.get("/api/totens/slug/:slug", (req, res, next) =>
   totemController.getPublic(req, res, next),
 );

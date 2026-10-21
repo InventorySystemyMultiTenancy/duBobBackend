@@ -8,11 +8,13 @@ import { OrderRepository } from "../repositories/OrderRepository.js";
 import { MesaRepository } from "../repositories/MesaRepository.js";
 import { AppSettingRepository } from "../repositories/AppSettingRepository.js";
 import { TotemService } from "../services/TotemService.js";
+import { OrderService } from "../services/OrderService.js";
 
 const orderRepository = new OrderRepository();
 const mesaRepository = new MesaRepository();
 const appSettingRepository = new AppSettingRepository();
 const totemService = new TotemService();
+const orderService = new OrderService();
 
 export class PaymentController {
   async createPreference(req, res, next) {
@@ -432,6 +434,89 @@ export class PaymentController {
           status: mpOrder.status,
         },
       });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  // Cliente desistiu na tela "Aguardando pagamento na maquininha" do totem.
+  // Só cancela o pedido se a cobrança na maquininha também for cancelada,
+  // para o cliente não pagar um pedido que já foi cancelado.
+  async cancelTotemTerminalPayment(req, res, next) {
+    try {
+      const { orderId } = req.body;
+
+      if (!orderId) throw new AppError("orderId obrigatório.", 422);
+
+      const order = await orderRepository.findById(orderId);
+      if (!order) throw new AppError("Pedido não encontrado.", 404);
+
+      if (order.userId !== req.user.id && req.user.role !== "ADMIN") {
+        throw new AppError("Acesso negado.", 403);
+      }
+
+      if (order.paymentStatus === "APROVADO") {
+        throw new AppError("Pagamento já aprovado. O pedido não pode ser cancelado.", 409);
+      }
+
+      if (order.status === "CANCELADO") {
+        return res.status(200).json({ data: order, message: "Pedido já cancelado." });
+      }
+
+      if (order.terminalIntentId) {
+        const mpToken = process.env.MP_ACCESS_TOKEN;
+        if (!mpToken) throw new AppError("Mercado Pago não configurado.", 500);
+
+        const mpHeaders = {
+          Authorization: `Bearer ${mpToken}`,
+          "Content-Type": "application/json",
+        };
+        const cancelResp = await fetch(
+          `https://api.mercadopago.com/v1/orders/${order.terminalIntentId}/cancel`,
+          {
+            method: "POST",
+            headers: {
+              ...mpHeaders,
+              "X-Idempotency-Key": `totem-cancel-${order.id}-${order.terminalIntentId}`,
+            },
+          },
+        );
+
+        if (!cancelResp.ok) {
+          // Pode já estar cancelada/expirada; nesse caso segue com o cancelamento.
+          const statusResp = await fetch(
+            `https://api.mercadopago.com/v1/orders/${order.terminalIntentId}`,
+            { headers: mpHeaders },
+          );
+          const mpOrder = await statusResp.json().catch(() => ({}));
+          const closed = ["canceled", "expired", "failed", "refunded"].includes(
+            mpOrder?.status,
+          );
+
+          if (!closed) {
+            const errBody = await cancelResp.json().catch(() => ({}));
+            console.warn(
+              "[cancelTotemTerminalPayment] MP não cancelou:",
+              mpOrder?.status,
+              errBody?.message,
+            );
+            throw new AppError(
+              "Não foi possível cancelar na maquininha. Cancele na própria maquininha ou chame um atendente.",
+              409,
+            );
+          }
+        }
+      }
+
+      // O webhook pode ter aprovado enquanto cancelávamos.
+      const latest = await orderRepository.findById(order.id);
+      if (latest?.paymentStatus === "APROVADO") {
+        throw new AppError("Pagamento já aprovado. O pedido não pode ser cancelado.", 409);
+      }
+
+      const cancelled = await orderService.cancelOrder(order.id);
+
+      return res.status(200).json({ data: cancelled, message: "Pagamento cancelado." });
     } catch (error) {
       return next(error);
     }
