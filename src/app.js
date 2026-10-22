@@ -687,6 +687,38 @@ app.get(
   },
 );
 
+// Pareia o reader da maquininha para o totem/caixa enviar a cobrança a ela.
+app.post(
+  "/api/admin/settings/payment/sumup/operators/:operatorId/reader",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const data = await paymentSettingsService.pairSumUpOperatorReader(
+        req.params.operatorId,
+        req.body?.pairingCode,
+      );
+      return res.status(200).json({ message: "Maquininha pareada.", data });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+app.delete(
+  "/api/admin/settings/payment/sumup/operators/:operatorId/reader",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      await paymentSettingsService.unpairSumUpOperatorReader(req.params.operatorId);
+      return res.status(200).json({ message: "Pareamento removido." });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
 app.delete(
   "/api/admin/settings/payment/sumup/operators/:operatorId",
   authenticateToken,

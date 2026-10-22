@@ -77,6 +77,55 @@ export class SumUpClient {
     }
   }
 
+  // Pareia um reader na Cloud API. O pairing_code aparece NO APARELHO:
+  // Menu > Conexões > Wi-Fi > API > Conectar (vale 5 minutos).
+  async createReader(merchantCode, pairingCode, name) {
+    const data = await this.request("POST", `/v0.1/merchants/${merchantCode}/readers`, {
+      pairing_code: pairingCode,
+      ...(name ? { name } : {}),
+    });
+    if (!data.id) throw new AppError("SumUp não retornou o id da maquininha.", 502);
+    return { id: String(data.id), status: data.status ?? null };
+  }
+
+  // Envia a cobrança para a tela do reader. Devolve o client_transaction_id,
+  // usado depois para consultar a venda (sem depender de webhook).
+  async createReaderCheckout(merchantCode, readerId, { amount, description }) {
+    const data = await this.request(
+      "POST",
+      `/v0.1/merchants/${merchantCode}/readers/${readerId}/checkout`,
+      {
+        total_amount: {
+          currency: "BRL",
+          minor_unit: 2,
+          value: Math.round(Number(amount) * 100),
+        },
+        ...(description ? { description } : {}),
+      },
+    );
+    const payload = data.data ?? data;
+    return { clientTransactionId: payload.client_transaction_id ?? null };
+  }
+
+  // Cancela a cobrança que está aberta na tela do reader.
+  async terminateReaderCheckout(merchantCode, readerId) {
+    await this.request(
+      "POST",
+      `/v0.1/merchants/${merchantCode}/readers/${readerId}/terminate`,
+    );
+  }
+
+  async getTransactionByClientId(merchantCode, clientTransactionId) {
+    const query = new URLSearchParams({ client_transaction_id: clientTransactionId });
+    try {
+      return await this.request("GET", `/v2.1/merchants/${merchantCode}/transactions?${query}`);
+    } catch (error) {
+      // 404 = o cliente ainda não pagou.
+      if (error.providerStatus === 404) return null;
+      throw error;
+    }
+  }
+
   // Checkout online (delivery). Com hostedCheckout a SumUp devolve
   // hosted_checkout_url, uma página de cartão hospedada por ela.
   async createCheckout(merchantCode, { amount, reference, description, redirectUrl, hostedCheckout }) {

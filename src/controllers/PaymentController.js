@@ -530,8 +530,15 @@ export class PaymentController {
       }
 
       if (isSumUpIntent(order.terminalIntentId)) {
-        // Nada fica aberto na maquininha SumUp; só confere se a venda já
-        // entrou antes de cancelar (a checagem abaixo barra se aprovou).
+        // Fecha a cobrança na tela da maquininha (se foi enviada) e confere se
+        // a venda já entrou antes de cancelar (a checagem abaixo barra se aprovou).
+        const closed = await sumUpPaymentService.cancelTerminalCharge(order);
+        if (!closed) {
+          throw new AppError(
+            "Não foi possível cancelar na maquininha. Cancele na própria maquininha ou chame um atendente.",
+            409,
+          );
+        }
         await sumUpPaymentService.syncAwaitingOrders().catch((e) =>
           console.warn("[cancelTotemTerminalPayment] SumUp:", e.message),
         );

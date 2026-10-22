@@ -8,7 +8,13 @@ import { SumUpPaymentService } from "../src/services/SumUpPaymentService.js";
 
 const MINUTE = 60 * 1000;
 
-function buildService({ orders, transactions = [], checkouts = {}, knownExternalIds = [] }) {
+function buildService({
+  orders,
+  transactions = [],
+  checkouts = {},
+  readerTransactions = {},
+  knownExternalIds = [],
+}) {
   const orderRepository = {
     findAwaitingSumUpOrders: vi.fn().mockResolvedValue(orders),
     updatePaymentStatus: vi.fn(),
@@ -21,6 +27,7 @@ function buildService({ orders, transactions = [], checkouts = {}, knownExternal
   const client = {
     listSuccessfulTransactions: vi.fn().mockResolvedValue(transactions),
     getCheckout: vi.fn(async (id) => checkouts[id]),
+    getTransactionByClientId: vi.fn(async (_mc, id) => readerTransactions[id] ?? null),
   };
   const paymentSettingsService = {
     requireSumUpClient: vi.fn().mockResolvedValue({ client, merchantCode: "MC1" }),
@@ -149,5 +156,41 @@ describe("SumUpPaymentService online (checkout)", () => {
 
     expect(await service.syncAwaitingOrders()).toBe(0);
     expect(orderRepository.updatePaymentStatus).toHaveBeenCalledWith("A", "RECUSADO");
+  });
+});
+
+describe("SumUpPaymentService cobrança enviada ao reader", () => {
+  const readerIntent = (sentAt, ctid) => `sumup-user:t@x.com:${sentAt}:rdr_1:${ctid}`;
+
+  it("aprova pela consulta do client_transaction_id", async () => {
+    const { service, orderRepository, paymentRepository } = buildService({
+      orders: [{ id: "A", total: "18.00", terminalIntentId: readerIntent(Date.now(), "ct1") }],
+      readerTransactions: { ct1: { id: "tx5", status: "SUCCESSFUL", amount: 18 } },
+    });
+
+    expect(await service.syncAwaitingOrders()).toBe(1);
+    expect(orderRepository.updatePaymentStatus).toHaveBeenCalledWith("A", "APROVADO");
+    expect(paymentRepository.upsertFromWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ externalId: "sumup:tx5" }),
+    );
+  });
+
+  it("recusa quando a venda falha na maquininha", async () => {
+    const { service, orderRepository } = buildService({
+      orders: [{ id: "A", total: "18.00", terminalIntentId: readerIntent(Date.now(), "ct1") }],
+      readerTransactions: { ct1: { id: "tx5", status: "FAILED", amount: 18 } },
+    });
+
+    expect(await service.syncAwaitingOrders()).toBe(0);
+    expect(orderRepository.updatePaymentStatus).toHaveBeenCalledWith("A", "RECUSADO");
+  });
+
+  it("enquanto não paga, continua aguardando", async () => {
+    const { service, orderRepository } = buildService({
+      orders: [{ id: "A", total: "18.00", terminalIntentId: readerIntent(Date.now(), "ct1") }],
+    });
+
+    expect(await service.syncAwaitingOrders()).toBe(0);
+    expect(orderRepository.updatePaymentStatus).not.toHaveBeenCalled();
   });
 });

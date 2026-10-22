@@ -180,6 +180,24 @@ export class PaymentSettingsService {
     };
   }
 
+  // Pareia o reader físico desta maquininha para o totem/caixa enviar a
+  // cobrança direto para a tela dela.
+  async pairSumUpOperatorReader(id, pairingCode) {
+    const code = String(pairingCode ?? "").trim().toUpperCase();
+    if (!code) throw new AppError("Informe o código que aparece na maquininha.", 422);
+    const operator = await this.sumUpOperatorRepository.findById(id);
+    if (!operator) throw new AppError("Maquininha não encontrada.", 404);
+
+    const { client, merchantCode } = await this.requireSumUpClient();
+    const reader = await client.createReader(merchantCode, code, operator.name);
+    await this.sumUpOperatorRepository.setReaderId(id, reader.id);
+    return { readerId: reader.id, status: reader.status };
+  }
+
+  async unpairSumUpOperatorReader(id) {
+    await this.sumUpOperatorRepository.setReaderId(id, null);
+  }
+
   // Só remove daqui; o usuário continua na conta SumUp (desative pelo painel dela).
   async deleteSumUpOperator(id) {
     await this.sumUpOperatorRepository.delete(id);
