@@ -19,7 +19,7 @@ export class TotemService {
     return `totem${number}`;
   }
 
-  async create({ name, number, terminalId, voiceEnabled }) {
+  async create({ name, number, terminalId, voiceEnabled, sumupOperatorId }) {
     try {
       return await this.totemRepository.create({
         name,
@@ -27,6 +27,7 @@ export class TotemService {
         slug: this.buildSlug(number),
         terminalId: terminalId ?? null,
         voiceEnabled: voiceEnabled ?? false,
+        sumupOperatorId: sumupOperatorId ?? null,
       });
     } catch (err) {
       if (isUniqueError(err)) {
@@ -56,7 +57,7 @@ export class TotemService {
     if (!totem || !totem.isActive) {
       throw new AppError("Totem não encontrado ou inativo.", 404);
     }
-    if (!totem.terminalId) {
+    if (!totem.terminalId && !totem.sumupOperatorId) {
       throw new AppError("Totem sem maquininha configurada.", 422);
     }
     return totem;

@@ -11,6 +11,7 @@ function mapTotem(row) {
     terminalId: row.terminalId,
     isActive: row.isActive,
     voiceEnabled: Boolean(row.voiceEnabled),
+    sumupOperatorId: row.sumupOperatorId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -41,13 +42,25 @@ export class TotemRepository {
     await prisma.$executeRaw`
       ALTER TABLE "Totem" ADD COLUMN IF NOT EXISTS "voiceEnabled" BOOLEAN NOT NULL DEFAULT false
     `;
+    // Maquininha SumUp do totem (SumUpOperator.id), separada do terminalId do
+    // Mercado Pago para trocar de banco sem perder nenhuma das duas.
+    await prisma.$executeRaw`
+      ALTER TABLE "Totem" ADD COLUMN IF NOT EXISTS "sumupOperatorId" TEXT
+    `;
   }
 
-  async create({ name, number, slug, terminalId, voiceEnabled = false }) {
+  async create({
+    name,
+    number,
+    slug,
+    terminalId,
+    voiceEnabled = false,
+    sumupOperatorId = null,
+  }) {
     await this.ensureTable();
     const rows = await prisma.$queryRaw`
-      INSERT INTO "Totem" ("id", "name", "number", "slug", "terminalId", "voiceEnabled", "updatedAt")
-      VALUES (${randomUUID()}, ${name}, ${number}, ${slug}, ${terminalId}, ${voiceEnabled}, NOW())
+      INSERT INTO "Totem" ("id", "name", "number", "slug", "terminalId", "voiceEnabled", "sumupOperatorId", "updatedAt")
+      VALUES (${randomUUID()}, ${name}, ${number}, ${slug}, ${terminalId}, ${voiceEnabled}, ${sumupOperatorId}, NOW())
       RETURNING *
     `;
     return mapTotem(rows[0]);
@@ -98,6 +111,10 @@ export class TotemRepository {
         Object.prototype.hasOwnProperty.call(data, "voiceEnabled")
           ? data.voiceEnabled
           : current.voiceEnabled,
+      sumupOperatorId:
+        Object.prototype.hasOwnProperty.call(data, "sumupOperatorId")
+          ? data.sumupOperatorId
+          : current.sumupOperatorId,
     };
 
     const rows = await prisma.$queryRaw`
@@ -109,6 +126,7 @@ export class TotemRepository {
         "terminalId" = ${next.terminalId},
         "isActive" = ${next.isActive},
         "voiceEnabled" = ${next.voiceEnabled},
+        "sumupOperatorId" = ${next.sumupOperatorId},
         "updatedAt" = NOW()
       WHERE "id" = ${id}
       RETURNING *

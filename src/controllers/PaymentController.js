@@ -390,6 +390,16 @@ export class PaymentController {
         totemId || totemSlug
           ? await totemService.findByPaymentRef({ totemId, totemSlug })
           : null;
+      const provider = await paymentSettingsService.getProvider("terminal");
+      if (provider === PAYMENT_PROVIDERS.SUMUP && totem?.sumupOperatorId) {
+        // Maquininha SumUp escolhida no cadastro do totem.
+        const data = await sumUpPaymentService.startTerminalChargeForOperator(
+          order,
+          totem.sumupOperatorId,
+        );
+        return res.status(200).json({ data });
+      }
+
       let terminalId = totem?.terminalId?.trim();
 
       if (!terminalId) {
@@ -401,7 +411,6 @@ export class PaymentController {
 
       if (!terminalId) throw new AppError("Totem sem maquininha configurada.", 422);
 
-      const provider = await paymentSettingsService.getProvider("terminal");
       if (provider === PAYMENT_PROVIDERS.SUMUP) {
         const data = await sumUpPaymentService.startTerminalCharge(
           order,

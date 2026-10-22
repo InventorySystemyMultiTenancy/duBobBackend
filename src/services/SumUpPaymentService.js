@@ -142,6 +142,18 @@ export class SumUpPaymentService {
     };
   }
 
+  // Cobra na maquininha SumUp vinculada pelo id (ex.: a escolhida no totem).
+  async startTerminalChargeForOperator(order, operatorId) {
+    const operator = await this.sumUpOperatorRepository.findById(operatorId);
+    if (!operator) {
+      throw new AppError(
+        "A maquininha SumUp deste totem não existe mais. Escolha outra no cadastro do totem.",
+        422,
+      );
+    }
+    return this.startTerminalCharge(order, operator.email);
+  }
+
   // Encerra a cobrança aberta na tela do reader. Devolve false se não deu
   // para garantir que ela foi fechada (aí o pedido não deve ser cancelado).
   async cancelTerminalCharge(order) {

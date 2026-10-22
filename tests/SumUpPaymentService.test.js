@@ -194,3 +194,33 @@ describe("SumUpPaymentService cobrança enviada ao reader", () => {
     expect(orderRepository.updatePaymentStatus).not.toHaveBeenCalled();
   });
 });
+
+describe("SumUpPaymentService maquininha escolhida no totem", () => {
+  const operator = { id: "op1", name: "Totem1", email: "maq.1@dubob.com.br", readerId: null };
+  const operatorRepository = {
+    findAll: vi.fn().mockResolvedValue([operator]),
+    findById: vi.fn(async (id) => (id === "op1" ? operator : null)),
+  };
+  const orderRepository = { saveTerminalIntentId: vi.fn() };
+
+  it("cobra na maquininha pelo id e marca o pedido com o usuário dela", async () => {
+    const service = new SumUpPaymentService(orderRepository, {}, operatorRepository, {});
+    const result = await service.startTerminalChargeForOperator(
+      { id: "pedido123456", total: "12.00", terminalIntentId: null },
+      "op1",
+    );
+
+    expect(result.terminalName).toBe("Totem1");
+    expect(orderRepository.saveTerminalIntentId).toHaveBeenCalledWith(
+      "pedido123456",
+      expect.stringMatching(/^sumup-user:maq\.1@dubob\.com\.br:\d+$/),
+    );
+  });
+
+  it("avisa quando a maquininha escolhida foi removida", async () => {
+    const service = new SumUpPaymentService(orderRepository, {}, operatorRepository, {});
+    await expect(
+      service.startTerminalChargeForOperator({ id: "p", total: "1.00" }, "sumiu"),
+    ).rejects.toThrow(/não existe mais/);
+  });
+});
