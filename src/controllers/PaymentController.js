@@ -193,10 +193,10 @@ export class PaymentController {
         if (!mesa?.terminalId) {
           throw new AppError("Mesa sem maquininha configurada.", 422);
         }
-        const data = await sumUpPaymentService.startTerminalCheckout(
+        // Na SumUp o "ID da maquininha" é o usuário SumUp logado nela.
+        const data = await sumUpPaymentService.startTerminalCharge(
           order,
           mesa.terminalId,
-          `Pedido Mesa ${mesa.number} #${order.id.slice(-6).toUpperCase()}`,
         );
         return res.status(200).json({ data });
       }
@@ -370,10 +370,9 @@ export class PaymentController {
 
       const provider = await paymentSettingsService.getActiveProvider();
       if (provider === PAYMENT_PROVIDERS.SUMUP) {
-        const data = await sumUpPaymentService.startTerminalCheckout(
+        const data = await sumUpPaymentService.startTerminalCharge(
           order,
           terminalId,
-          `Pedido ${totem?.name ?? "Totem"} #${order.id.slice(-6).toUpperCase()}`,
         );
         return res.status(200).json({ data });
       }
@@ -498,14 +497,11 @@ export class PaymentController {
       }
 
       if (isSumUpIntent(order.terminalIntentId)) {
-        const canCancel =
-          await sumUpPaymentService.tryCancelBeforeOrderCancel(order);
-        if (!canCancel) {
-          throw new AppError(
-            "Não foi possível cancelar na maquininha. Cancele na própria maquininha ou chame um atendente.",
-            409,
-          );
-        }
+        // Nada fica aberto na maquininha SumUp; só confere se a venda já
+        // entrou antes de cancelar (a checagem abaixo barra se aprovou).
+        await sumUpPaymentService.syncAwaitingOrders().catch((e) =>
+          console.warn("[cancelTotemTerminalPayment] SumUp:", e.message),
+        );
       } else if (order.terminalIntentId) {
         const mpToken = process.env.MP_ACCESS_TOKEN;
         if (!mpToken) throw new AppError("Mercado Pago não configurado.", 500);

@@ -1,175 +1,186 @@
+import { AppError } from "../errors/AppError.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { PaymentRepository } from "../repositories/PaymentRepository.js";
+import { SumUpOperatorRepository } from "../repositories/SumUpOperatorRepository.js";
 import { PaymentSettingsService } from "./PaymentSettingsService.js";
 import { emitPaymentUpdated } from "../realtime/socketServer.js";
 
-// Pedido.terminalIntentId de cobranças SumUp: "sumup:<readerId>:<clientTransactionId>".
-// O prefixo separa das orders do Mercado Pago e guarda o reader para o terminate.
-const INTENT_PREFIX = "sumup:";
+// Igual ao CompactPay: nem o ID do reader nem o webhook são confiáveis, então
+// cada maquininha fica logada com um usuário SumUp próprio e consultamos o
+// histórico de vendas. Uma venda aprovada é do pedido que está aguardando
+// naquela maquininha (mesmo usuário) com o mesmo valor.
+//
+// Order.terminalIntentId de pedidos aguardando: "sumup-user:<email>:<enviadoEmMs>".
+const INTENT_PREFIX = "sumup-user:";
 
-const STATUS_MAP = {
-  SUCCESSFUL: "APROVADO",
-  FAILED: "RECUSADO",
-  CANCELLED: "RECUSADO",
-  REFUNDED: "ESTORNADO",
-};
+const POLL_INTERVAL_MS =
+  Number(process.env.SUMUP_POLL_INTERVAL_SECONDS || 10) * 1000;
+// Depois disso o pedido deixa de ser casado automaticamente.
+const AWAITING_WINDOW_MS = 30 * 60 * 1000;
+// Folga no changes_since para vendas que demoram a aparecer no histórico.
+const CHANGES_SINCE_MARGIN_MS = 5 * 60 * 1000;
+// Venda feita um pouco antes de o pedido chegar na tela (relógios diferentes).
+const CLOCK_SKEW_MS = 2 * 60 * 1000;
 
-// O webhook da SumUp pode não chegar (servidor dormindo, rede); por isso
-// também consultamos a transação por alguns minutos depois de criar a cobrança.
-const WATCH_INTERVAL_MS = 5000;
-const WATCH_TIMEOUT_MS = 4 * 60 * 1000;
-const watchers = new Map();
+let pollTimer = null;
+let polling = false;
+
+const toCents = (value) => Math.round(Number(value) * 100);
+const toSumUpDate = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 
 export const isSumUpIntent = (intentId) =>
   String(intentId ?? "").startsWith(INTENT_PREFIX);
 
 export const parseSumUpIntent = (intentId) => {
   if (!isSumUpIntent(intentId)) return null;
-  const [readerId, ...rest] = intentId.slice(INTENT_PREFIX.length).split(":");
-  return { readerId, clientTransactionId: rest.join(":") };
+  const rest = intentId.slice(INTENT_PREFIX.length);
+  const separator = rest.lastIndexOf(":");
+  return {
+    email: rest.slice(0, separator).toLowerCase(),
+    sentAt: Number(rest.slice(separator + 1)) || 0,
+  };
 };
 
 export class SumUpPaymentService {
   constructor(
     orderRepository = new OrderRepository(),
     paymentRepository = new PaymentRepository(),
+    sumUpOperatorRepository = new SumUpOperatorRepository(),
     paymentSettingsService = new PaymentSettingsService(),
   ) {
     this.orderRepository = orderRepository;
     this.paymentRepository = paymentRepository;
+    this.sumUpOperatorRepository = sumUpOperatorRepository;
     this.paymentSettingsService = paymentSettingsService;
   }
 
-  async startTerminalCheckout(order, readerId, description) {
-    const { client, merchantCode } =
-      await this.paymentSettingsService.requireSumUpClient();
-
-    // Cobrança anterior ainda aberta na maquininha: encerra antes de mandar outra.
-    if (order.terminalIntentId) {
-      await this.cancelTerminalCheckout(order).catch((e) =>
-        console.warn("[SumUp] Não foi possível encerrar cobrança anterior:", e.message),
+  // Marca o pedido como "aguardando na maquininha <usuário>". A cobrança é
+  // digitada na própria maquininha; o poller confirma quando a venda aparecer.
+  async startTerminalCharge(order, operatorEmail) {
+    const email = String(operatorEmail ?? "").trim().toLowerCase();
+    const operators = await this.sumUpOperatorRepository.findAll();
+    const operator = operators.find((item) => item.email === email);
+    if (!operator) {
+      throw new AppError(
+        "A maquininha deste local não é um usuário SumUp cadastrado em Admin → Pagamentos.",
+        422,
       );
     }
 
-    const backendUrl = process.env.BACKEND_URL || "https://dubobbackend.onrender.com";
-    const { clientTransactionId } = await client.createReaderCheckout(
-      merchantCode,
-      readerId,
-      {
-        amount: order.total,
-        description,
-        returnUrl: `${backendUrl}/api/payments/sumup/webhook`,
-      },
+    await this.orderRepository.saveTerminalIntentId(
+      order.id,
+      `${INTENT_PREFIX}${email}:${Date.now()}`,
     );
+    console.log(`[SumUp] Pedido ${order.id} aguardando na maquininha ${email}`);
+    this.ensurePolling();
 
-    const intentId = `${INTENT_PREFIX}${readerId}:${clientTransactionId}`;
-    await this.orderRepository.saveTerminalIntentId(order.id, intentId);
-    console.log("[SumUp] Cobrança enviada:", intentId, "-> pedido", order.id);
-
-    this.#watch(order.id, intentId);
-
-    return { intentId, deviceId: readerId, status: "pending" };
-  }
-
-  async cancelTerminalCheckout(order) {
-    const intent = parseSumUpIntent(order.terminalIntentId);
-    if (!intent) return;
-    const { client, merchantCode } =
-      await this.paymentSettingsService.requireSumUpClient();
-    this.#stopWatch(order.id);
-    await client.terminateReaderCheckout(merchantCode, intent.readerId);
-  }
-
-  // Cancelamento pedido pelo cliente no totem. Devolve false se a cobrança
-  // pode continuar aberta na maquininha (aí o pedido não deve ser cancelado);
-  // se já foi paga, o controller barra pelo paymentStatus atualizado.
-  async tryCancelBeforeOrderCancel(order) {
-    try {
-      await this.cancelTerminalCheckout(order);
-    } catch (error) {
-      // 4xx = maquininha sem cobrança aberta (já expirou/foi cancelada nela).
-      const nothingOpen = error.providerStatus >= 400 && error.providerStatus < 500;
-      if (!nothingOpen) {
-        console.warn("[SumUp] terminate falhou:", error.message);
-        return false;
-      }
-    }
-    await this.syncOrder(order.id, order.terminalIntentId).catch(() => null);
-    return true;
-  }
-
-  // Consulta a SumUp e grava o status no pedido. Devolve o paymentStatus.
-  async syncOrder(orderId, intentId) {
-    const intent = parseSumUpIntent(intentId);
-    if (!intent) return null;
-
-    const order = await this.orderRepository.findById(orderId);
-    if (!order || order.terminalIntentId !== intentId) return null;
-    if (order.paymentStatus === "APROVADO") return "APROVADO";
-
-    const { client, merchantCode } =
-      await this.paymentSettingsService.requireSumUpClient();
-    const transaction = await client.getTransactionByClientId(
-      merchantCode,
-      intent.clientTransactionId,
-    );
-    const paymentStatus = STATUS_MAP[String(transaction?.status ?? "").toUpperCase()];
-    if (!paymentStatus) return "PENDENTE";
-
-    await this.paymentRepository.upsertFromWebhook({
-      orderId,
+    return {
       provider: "SUMUP",
-      externalId: transaction.id ? `sumup:${transaction.id}` : null,
-      status: paymentStatus,
+      mode: "manual",
+      deviceId: email,
+      terminalName: operator.name,
+      amount: Number(order.total).toFixed(2),
+      status: "waiting",
+    };
+  }
+
+  ensurePolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(() => this.#tick(), POLL_INTERVAL_MS);
+    pollTimer.unref?.();
+  }
+
+  #stopPolling() {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  async #tick() {
+    if (polling) return;
+    polling = true;
+    try {
+      const matched = await this.syncAwaitingOrders();
+      if (matched === null) this.#stopPolling();
+    } catch (error) {
+      console.warn("[SumUp poller] Falha:", error.message);
+    } finally {
+      polling = false;
+    }
+  }
+
+  // Devolve quantos pedidos foram aprovados, ou null se não há nada aguardando.
+  async syncAwaitingOrders() {
+    const now = Date.now();
+    const awaiting = (await this.orderRepository.findAwaitingSumUpOrders())
+      .map((order) => ({ ...order, intent: parseSumUpIntent(order.terminalIntentId) }))
+      .filter((order) => order.intent && now - order.intent.sentAt < AWAITING_WINDOW_MS);
+    if (!awaiting.length) return null;
+
+    const { client, merchantCode } =
+      await this.paymentSettingsService.requireSumUpClient();
+    const oldestSentAt = Math.min(...awaiting.map((order) => order.intent.sentAt));
+    const transactions = await client.listSuccessfulTransactions(
+      merchantCode,
+      toSumUpDate(oldestSentAt - CHANGES_SINCE_MARGIN_MS),
+    );
+
+    let matched = 0;
+    for (const transaction of transactions) {
+      if (String(transaction.status ?? "").toUpperCase() !== "SUCCESSFUL") continue;
+      const transactionId = String(transaction.id ?? transaction.transaction_id ?? "");
+      if (!transactionId) continue;
+      const externalId = `sumup:${transactionId}`;
+      if (await this.paymentRepository.existsByExternalId(externalId)) continue;
+
+      const order = this.#matchOrder(awaiting, transaction);
+      if (!order) {
+        console.log(
+          `[SumUp poller] Venda ${transactionId} (R$ ${transaction.amount}, usuário ${transaction.user}) sem pedido aguardando.`,
+        );
+        continue;
+      }
+
+      await this.#approve(order, externalId, transaction);
+      awaiting.splice(awaiting.indexOf(order), 1);
+      matched += 1;
+    }
+    return matched;
+  }
+
+  #matchOrder(awaiting, transaction) {
+    const user = String(transaction.user ?? "").trim().toLowerCase();
+    const amountCents = toCents(transaction.amount);
+    const paidAt = Date.parse(transaction.timestamp ?? "") || Date.now();
+
+    // Mesma maquininha, mesmo valor e venda feita depois do pedido ir para a
+    // maquininha. Com mais de um candidato, fica o que chegou por último antes da venda.
+    return awaiting
+      .filter(
+        (order) =>
+          order.intent.email === user &&
+          toCents(order.total) === amountCents &&
+          order.intent.sentAt - CLOCK_SKEW_MS <= paidAt,
+      )
+      .sort((a, b) => b.intent.sentAt - a.intent.sentAt)[0];
+  }
+
+  async #approve(order, externalId, transaction) {
+    await this.paymentRepository.upsertFromWebhook({
+      orderId: order.id,
+      provider: "SUMUP",
+      externalId,
+      status: "APROVADO",
       payload: transaction,
       amount: order.total,
     });
-    await this.orderRepository.updatePaymentStatus(orderId, paymentStatus);
-    emitPaymentUpdated({ orderId, userId: order.userId, paymentStatus });
-    console.log(`[SumUp] ✅ Pedido ${orderId} -> paymentStatus=${paymentStatus}`);
-
-    return paymentStatus;
-  }
-
-  async handleWebhook(body) {
-    const clientTransactionId = String(
-      body?.payload?.client_transaction_id ?? body?.id ?? "",
-    ).trim();
-    if (!clientTransactionId) return { ignored: true };
-
-    const order =
-      await this.orderRepository.findBySumUpClientTransactionId(clientTransactionId);
-    if (!order) {
-      console.warn("[SumUp webhook] Cobrança desconhecida:", clientTransactionId);
-      return { ignored: true };
-    }
-
-    const paymentStatus = await this.syncOrder(order.id, order.terminalIntentId);
-    if (paymentStatus && paymentStatus !== "PENDENTE") this.#stopWatch(order.id);
-    return { orderId: order.id, paymentStatus };
-  }
-
-  #watch(orderId, intentId) {
-    this.#stopWatch(orderId);
-    const startedAt = Date.now();
-    const timer = setInterval(async () => {
-      if (Date.now() - startedAt > WATCH_TIMEOUT_MS) {
-        this.#stopWatch(orderId);
-        return;
-      }
-      try {
-        const status = await this.syncOrder(orderId, intentId);
-        if (status !== "PENDENTE") this.#stopWatch(orderId);
-      } catch (e) {
-        console.warn("[SumUp] Falha ao consultar cobrança:", e.message);
-      }
-    }, WATCH_INTERVAL_MS);
-    timer.unref?.();
-    watchers.set(orderId, timer);
-  }
-
-  #stopWatch(orderId) {
-    clearInterval(watchers.get(orderId));
-    watchers.delete(orderId);
+    await this.orderRepository.updatePaymentStatus(order.id, "APROVADO");
+    emitPaymentUpdated({
+      orderId: order.id,
+      userId: order.userId,
+      paymentStatus: "APROVADO",
+    });
+    console.log(
+      `[SumUp poller] ✅ Pedido ${order.id} aprovado pela venda ${externalId} (${order.intent.email})`,
+    );
   }
 }

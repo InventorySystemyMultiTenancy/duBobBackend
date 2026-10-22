@@ -441,16 +441,16 @@ export class OrderRepository {
     return rows[0] ?? null;
   }
 
-  async findBySumUpClientTransactionId(clientTransactionId) {
-    const rows = await prisma.$queryRaw`
-      SELECT id, "terminalIntentId"
+  // Pedidos esperando pagamento numa maquininha SumUp (ver SumUpPaymentService).
+  async findAwaitingSumUpOrders() {
+    return prisma.$queryRaw`
+      SELECT id, "userId", total, "terminalIntentId"
       FROM "Order"
-      WHERE "terminalIntentId" LIKE 'sumup:%'
-        AND "terminalIntentId" LIKE ${"%:" + clientTransactionId}
-      ORDER BY "updatedAt" DESC
-      LIMIT 1
+      WHERE "paymentStatus" = 'PENDENTE'
+        AND "status" <> 'CANCELADO'
+        AND "terminalIntentId" LIKE 'sumup-user:%'
+        AND "createdAt" >= NOW() - INTERVAL '24 hours'
     `;
-    return rows[0] ?? null;
   }
 
   /**
@@ -465,7 +465,7 @@ export class OrderRepository {
       FROM "Order"
       WHERE "paymentStatus" = 'PENDENTE'
         AND "terminalIntentId" IS NOT NULL
-        AND "terminalIntentId" NOT LIKE 'sumup:%'
+        AND "terminalIntentId" NOT LIKE 'sumup-user:%'
         AND ROUND(total::numeric, 2) = ${parseFloat(amountDecimal)}
         AND "createdAt" >= NOW() - INTERVAL '24 hours'
       ORDER BY "createdAt" DESC

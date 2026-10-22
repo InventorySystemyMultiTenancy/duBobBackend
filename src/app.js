@@ -57,6 +57,11 @@ const expenseController = new ExpenseController();
 const appSettingRepository = new AppSettingRepository();
 const paymentSettingsService = new PaymentSettingsService();
 const sumUpPaymentService = new SumUpPaymentService();
+// Retoma a consulta de vendas SumUp se o servidor reiniciou com pedidos aguardando.
+sumUpPaymentService
+  .syncAwaitingOrders()
+  .then((matched) => matched !== null && sumUpPaymentService.ensurePolling())
+  .catch(() => {});
 
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173")
   .split(",")
@@ -527,15 +532,6 @@ app.post("/api/payments/webhook", (req, res, next) =>
   orderController.paymentWebhook(req, res, next),
 );
 
-// Webhook da SumUp (return_url da cobrança na maquininha). O status é sempre
-// reconsultado na API da SumUp, então o corpo recebido não é confiado.
-app.post("/api/payments/sumup/webhook", (req, res) => {
-  res.status(200).json({ message: "OK" });
-  sumUpPaymentService.handleWebhook(req.body).catch((err) => {
-    console.error("[SumUp webhook] Erro ao processar:", err.message);
-  });
-});
-
 // MP IPN validation — sends GET to confirm the endpoint is alive
 app.get("/api/payments/webhook", (_req, res) => {
   return res.status(200).json({ status: "ok" });
@@ -623,13 +619,14 @@ app.put(
   },
 );
 
+// Maquininhas SumUp: cada uma tem um usuário SumUp próprio (igual CompactPay)
 app.get(
-  "/api/admin/settings/payment/sumup/readers",
+  "/api/admin/settings/payment/sumup/operators",
   authenticateToken,
   authorizeRoles("ADMIN"),
   async (_req, res, next) => {
     try {
-      const data = await paymentSettingsService.listSumUpReaders();
+      const data = await paymentSettingsService.listSumUpOperators();
       return res.status(200).json({ data });
     } catch (err) {
       return next(err);
@@ -638,16 +635,48 @@ app.get(
 );
 
 app.post(
-  "/api/admin/settings/payment/sumup/readers",
+  "/api/admin/settings/payment/sumup/operators",
   authenticateToken,
   authorizeRoles("ADMIN"),
   async (req, res, next) => {
     try {
-      const data = await paymentSettingsService.pairSumUpReader({
-        pairingCode: req.body?.pairingCode,
+      const data = await paymentSettingsService.createSumUpOperator({
         name: req.body?.name,
       });
-      return res.status(201).json({ message: "Maquininha pareada.", data });
+      return res.status(201).json({ message: "Maquininha criada.", data });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+app.get(
+  "/api/admin/settings/payment/sumup/operators/:operatorId/login",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const data = await paymentSettingsService.getSumUpOperatorLogin(
+        req.params.operatorId,
+      );
+      console.log(
+        `[SumUp] Admin ${req.user.id} viu o login da maquininha ${req.params.operatorId}`,
+      );
+      return res.status(200).json({ data });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+app.delete(
+  "/api/admin/settings/payment/sumup/operators/:operatorId",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      await paymentSettingsService.deleteSumUpOperator(req.params.operatorId);
+      return res.status(200).json({ message: "Maquininha removida." });
     } catch (err) {
       return next(err);
     }

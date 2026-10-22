@@ -2,8 +2,8 @@ import { AppError } from "../errors/AppError.js";
 
 const API = "https://api.sumup.com";
 
-// Cliente da API da SumUp (Cloud API das maquininhas Solo).
-// Baseado na integração do CompactPay (backend/app/services/sumup.py).
+// Cliente da API da SumUp. Baseado na integração do CompactPay
+// (backend/app/services/sumup.py).
 export class SumUpClient {
   constructor(apiKey) {
     this.apiKey = apiKey;
@@ -52,92 +52,44 @@ export class SumUpClient {
     return String(merchantCode);
   }
 
-  async listReaders(merchantCode) {
-    const data = await this.request("GET", `/v0.1/merchants/${merchantCode}/readers`);
-    const items = Array.isArray(data) ? data : (data.items ?? data.readers ?? data.data ?? []);
-    return items.map((item) => ({
-      id: item.id ?? item.reader_id,
-      name: item.name ?? item.device?.identifier ?? null,
-      status: item.status ?? null,
-      deviceIdentifier: item.device?.identifier ?? null,
-      model: item.device?.model ?? null,
-    }));
-  }
-
-  // O pairing_code é gerado NO APARELHO: menu > Conexões > Wi-Fi > API >
-  // Conectar. Expira em 5 minutos.
-  async createReader(merchantCode, pairingCode, name) {
-    const data = await this.request("POST", `/v0.1/merchants/${merchantCode}/readers`, {
-      pairing_code: pairingCode,
-      ...(name ? { name } : {}),
-    });
-    if (!data.id) throw new AppError("SumUp não retornou o id da maquininha.", 502);
-    return {
-      id: data.id,
-      name: data.name ?? data.device?.identifier ?? null,
-      status: data.status ?? null,
-      deviceIdentifier: data.device?.identifier ?? null,
-    };
-  }
-
-  async getReaderStatus(merchantCode, readerId) {
+  // Usuário gerenciado (sem convite por e-mail) para logar UMA maquininha.
+  // As vendas feitas nela, inclusive Pix, voltam no histórico com esse
+  // usuário no campo "user" — é assim que sabemos de qual maquininha veio.
+  // A chave precisa do escopo members.write.
+  async createManagedMember(merchantCode, { email, password, nickname }) {
     try {
-      const data = await this.request(
-        "GET",
-        `/v0.1/merchants/${merchantCode}/readers/${readerId}/status`,
-      );
-      const status = String((data.data ?? data).status ?? "").toLowerCase();
-      return {
-        status: status || "unknown",
-        online: ["online", "idle", "ready"].includes(status),
-      };
-    } catch {
-      return { status: "unavailable", online: false };
-    }
-  }
-
-  async createReaderCheckout(merchantCode, readerId, { amount, description, returnUrl }) {
-    const data = await this.request(
-      "POST",
-      `/v0.1/merchants/${merchantCode}/readers/${readerId}/checkout`,
-      {
-        total_amount: {
-          currency: "BRL",
-          minor_unit: 2,
-          value: Math.round(Number(amount) * 100),
-        },
-        ...(description ? { description } : {}),
-        ...(returnUrl ? { return_url: returnUrl } : {}),
-      },
-    );
-    const payload = data.data ?? data;
-    const clientTransactionId = payload.client_transaction_id ?? payload.checkout_id ?? payload.id;
-    if (!clientTransactionId) {
-      throw new AppError("SumUp não retornou o id da cobrança.", 502);
-    }
-    return { clientTransactionId: String(clientTransactionId) };
-  }
-
-  // Cancela a cobrança que está aberta na tela da maquininha.
-  async terminateReaderCheckout(merchantCode, readerId) {
-    await this.request(
-      "POST",
-      `/v0.1/merchants/${merchantCode}/readers/${readerId}/terminate`,
-    );
-  }
-
-  // Fonte da verdade do status: nunca confiamos só no corpo do webhook.
-  async getTransactionByClientId(merchantCode, clientTransactionId) {
-    const query = new URLSearchParams({ client_transaction_id: clientTransactionId });
-    try {
-      return await this.request(
-        "GET",
-        `/v2.1/merchants/${merchantCode}/transactions?${query}`,
-      );
+      return await this.request("POST", `/v0.1/merchants/${merchantCode}/members`, {
+        email,
+        password,
+        nickname: nickname.slice(0, 64),
+        is_managed_user: true,
+        roles: ["role_employee"],
+        metadata: { origem: "dubob" },
+      });
     } catch (error) {
-      // 404 = cliente ainda não passou o cartão/Pix.
-      if (error.providerStatus === 404) return null;
+      if ([401, 403].includes(error.providerStatus)) {
+        throw new AppError(
+          "A API key da SumUp não tem permissão para criar usuários (escopo members.write). Gere uma chave com essa permissão no painel da SumUp.",
+          422,
+        );
+      }
       throw error;
     }
+  }
+
+  // Histórico de vendas aprovadas. Não filtramos por payment_types: no
+  // CompactPay o filtro POS fazia a API devolver zero vendas da maquininha.
+  async listSuccessfulTransactions(merchantCode, changesSince) {
+    const query = new URLSearchParams({
+      "statuses[]": "SUCCESSFUL",
+      limit: "100",
+      order: "ascending",
+    });
+    if (changesSince) query.set("changes_since", changesSince);
+    const data = await this.request(
+      "GET",
+      `/v2.1/merchants/${merchantCode}/transactions/history?${query}`,
+    );
+    return (Array.isArray(data) ? data : data.items) ?? [];
   }
 }

@@ -1,6 +1,14 @@
 import { prisma } from "../lib/prisma.js";
 
 export class PaymentRepository {
+  async existsByExternalId(externalId) {
+    const payment = await prisma.payment.findUnique({
+      where: { externalId },
+      select: { id: true },
+    });
+    return Boolean(payment);
+  }
+
   async upsertFromWebhook({
     orderId,
     provider = "MERCADO_PAGO",

@@ -1,6 +1,9 @@
+import crypto from "crypto";
 import { AppError } from "../errors/AppError.js";
 import { AppSettingRepository } from "../repositories/AppSettingRepository.js";
 import { SumUpClient } from "./SumUpClient.js";
+import { SumUpOperatorRepository } from "../repositories/SumUpOperatorRepository.js";
+import { decryptSecret, encryptSecret } from "../lib/secretBox.js";
 
 export const PAYMENT_PROVIDERS = {
   MERCADO_PAGO: "MERCADO_PAGO",
@@ -14,9 +17,27 @@ const SUMUP_MERCHANT_KEY = "sumup_merchant_code";
 const maskSecret = (value) =>
   value ? `${value.slice(0, 6)}…${value.slice(-4)}` : "";
 
+// Só letras e números, fácil de digitar na maquininha.
+const generatePassword = (length = 14) => {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  while (true) {
+    const password = Array.from(
+      { length },
+      () => alphabet[crypto.randomInt(alphabet.length)],
+    ).join("");
+    if (/[A-Z]/.test(password) && /[a-z]/.test(password) && /\d/.test(password)) {
+      return password;
+    }
+  }
+};
+
 export class PaymentSettingsService {
-  constructor(appSettingRepository = new AppSettingRepository()) {
+  constructor(
+    appSettingRepository = new AppSettingRepository(),
+    sumUpOperatorRepository = new SumUpOperatorRepository(),
+  ) {
     this.appSettingRepository = appSettingRepository;
+    this.sumUpOperatorRepository = sumUpOperatorRepository;
   }
 
   // Banco usado nas cobranças da maquininha (mesa e totem).
@@ -107,21 +128,45 @@ export class PaymentSettingsService {
     return this.getAdminSettings();
   }
 
-  async listSumUpReaders() {
-    const { client, merchantCode } = await this.requireSumUpClient();
-    const readers = await client.listReaders(merchantCode);
-    return Promise.all(
-      readers.map(async (reader) => ({
-        ...reader,
-        connection: await client.getReaderStatus(merchantCode, reader.id),
-      })),
-    );
+  async listSumUpOperators() {
+    return this.sumUpOperatorRepository.findAll();
   }
 
-  async pairSumUpReader({ pairingCode, name }) {
-    const code = String(pairingCode ?? "").trim();
-    if (!code) throw new AppError("Informe o código de pareamento.", 422);
+  // Cria a maquininha e o usuário dela na SumUp. A senha só é mostrada ao
+  // admin para logar a maquininha (e pode ser vista de novo depois).
+  async createSumUpOperator({ name }) {
+    const label = String(name ?? "").trim();
+    if (!label) throw new AppError("Informe o nome da maquininha.", 422);
     const { client, merchantCode } = await this.requireSumUpClient();
-    return client.createReader(merchantCode, code, String(name ?? "").trim());
+
+    const email = `maquininha.${crypto.randomBytes(3).toString("hex")}@dubob.com.br`;
+    const password = generatePassword();
+    const member = await client.createManagedMember(merchantCode, {
+      email,
+      password,
+      nickname: `Dubob - ${label}`,
+    });
+
+    const operator = await this.sumUpOperatorRepository.create({
+      name: label,
+      email: String(member?.user?.email ?? email).toLowerCase(),
+      passwordEnc: encryptSecret(password),
+      memberId: member?.id ? String(member.id) : null,
+    });
+    return { ...operator, password };
+  }
+
+  async getSumUpOperatorLogin(id) {
+    const operator = await this.sumUpOperatorRepository.findById(id);
+    if (!operator) throw new AppError("Maquininha não encontrada.", 404);
+    return {
+      email: operator.email,
+      password: decryptSecret(operator.passwordEnc),
+    };
+  }
+
+  // Só remove daqui; o usuário continua na conta SumUp (desative pelo painel dela).
+  async deleteSumUpOperator(id) {
+    await this.sumUpOperatorRepository.delete(id);
   }
 }
