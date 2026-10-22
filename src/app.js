@@ -551,6 +551,23 @@ app.post("/api/payments/preference", authenticateToken, (req, res, next) =>
   paymentController.createPreference(req, res, next),
 );
 
+// Qual banco o checkout do delivery deve usar.
+app.get("/api/payments/online-provider", authenticateToken, async (_req, res, next) => {
+  try {
+    const provider = await paymentSettingsService.getProvider("online");
+    return res.status(200).json({ data: { provider } });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post(
+  "/api/payments/sumup/online",
+  authenticateToken,
+  authorizeRoles("CLIENTE", "ADMIN"),
+  (req, res, next) => paymentController.createSumUpOnlinePayment(req, res, next),
+);
+
 app.get(
   "/api/admin/settings/totem-terminal",
   authenticateToken,
@@ -607,7 +624,8 @@ app.put(
   async (req, res, next) => {
     try {
       const data = await paymentSettingsService.updateAdminSettings({
-        provider: req.body?.provider,
+        terminalProvider: req.body?.terminalProvider,
+        onlineProvider: req.body?.onlineProvider,
         sumupApiKey: req.body?.sumupApiKey,
       });
       return res

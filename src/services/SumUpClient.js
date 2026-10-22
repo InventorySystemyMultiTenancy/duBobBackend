@@ -77,6 +77,44 @@ export class SumUpClient {
     }
   }
 
+  // Checkout online (delivery). Com hostedCheckout a SumUp devolve
+  // hosted_checkout_url, uma página de cartão hospedada por ela.
+  async createCheckout(merchantCode, { amount, reference, description, redirectUrl, hostedCheckout }) {
+    return this.request("POST", "/v0.1/checkouts", {
+      checkout_reference: reference,
+      amount: Number(Number(amount).toFixed(2)),
+      currency: "BRL",
+      merchant_code: merchantCode,
+      ...(description ? { description } : {}),
+      ...(redirectUrl ? { redirect_url: redirectUrl } : {}),
+      ...(hostedCheckout ? { hosted_checkout: { enabled: true } } : {}),
+    });
+  }
+
+  // Pix (APM): a resposta traz "artefacts" com o QR (barcode) e o copia-e-cola (code).
+  async processPixCheckout(checkoutId, personalDetails) {
+    return this.request("PUT", `/v0.1/checkouts/${checkoutId}`, {
+      payment_type: "pix",
+      ...(personalDetails ? { personal_details: personalDetails } : {}),
+    });
+  }
+
+  // Fonte da verdade do status: PENDING, PAID, FAILED ou EXPIRED.
+  async getCheckout(checkoutId) {
+    return this.request("GET", `/v0.1/checkouts/${checkoutId}`);
+  }
+
+  // Lê um artefato do Pix: conteúdo inline ou baixado da URL indicada.
+  async readArtefact(artefact) {
+    if (!artefact) return null;
+    if (artefact.content) return String(artefact.content);
+    if (!artefact.location) return null;
+    const response = await fetch(artefact.location, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+    return response.ok ? (await response.text()).trim() : null;
+  }
+
   // Histórico de vendas aprovadas. Não filtramos por payment_types: no
   // CompactPay o filtro POS fazia a API devolver zero vendas da maquininha.
   async listSuccessfulTransactions(merchantCode, changesSince) {

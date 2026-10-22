@@ -10,7 +10,12 @@ export const PAYMENT_PROVIDERS = {
   SUMUP: "SUMUP",
 };
 
-const PROVIDER_KEY = "payment_provider";
+// "payment_provider" é o nome antigo da chave da maquininha; mantido para
+// não perder a escolha já salva.
+const PROVIDER_KEYS = {
+  terminal: "payment_provider",
+  online: "online_payment_provider",
+};
 const SUMUP_API_KEY = "sumup_api_key";
 const SUMUP_MERCHANT_KEY = "sumup_merchant_code";
 
@@ -40,9 +45,10 @@ export class PaymentSettingsService {
     this.sumUpOperatorRepository = sumUpOperatorRepository;
   }
 
-  // Banco usado nas cobranças da maquininha (mesa e totem).
-  async getActiveProvider() {
-    const setting = await this.appSettingRepository.get(PROVIDER_KEY);
+  // channel "terminal": maquininha (totem, mesa e caixa).
+  // channel "online": pagamento online (delivery).
+  async getProvider(channel) {
+    const setting = await this.appSettingRepository.get(PROVIDER_KEYS[channel]);
     return PAYMENT_PROVIDERS[setting?.value] ?? PAYMENT_PROVIDERS.MERCADO_PAGO;
   }
 
@@ -79,12 +85,14 @@ export class PaymentSettingsService {
   }
 
   async getAdminSettings() {
-    const [provider, sumup] = await Promise.all([
-      this.getActiveProvider(),
+    const [terminalProvider, onlineProvider, sumup] = await Promise.all([
+      this.getProvider("terminal"),
+      this.getProvider("online"),
       this.getSumUpCredentials(),
     ]);
     return {
-      provider,
+      terminalProvider,
+      onlineProvider,
       mercadoPago: { configured: Boolean(process.env.MP_ACCESS_TOKEN) },
       sumup: {
         configured: Boolean(sumup.apiKey),
@@ -95,7 +103,7 @@ export class PaymentSettingsService {
     };
   }
 
-  async updateAdminSettings({ provider, sumupApiKey }) {
+  async updateAdminSettings({ terminalProvider, onlineProvider, sumupApiKey }) {
     if (sumupApiKey !== undefined) {
       const apiKey = String(sumupApiKey ?? "").trim();
       if (apiKey) {
@@ -109,23 +117,30 @@ export class PaymentSettingsService {
       }
     }
 
-    if (provider !== undefined) {
-      if (!PAYMENT_PROVIDERS[provider]) {
-        throw new AppError("Banco de pagamento inválido.", 422);
-      }
-      if (provider === PAYMENT_PROVIDERS.SUMUP) {
-        const { apiKey } = await this.getSumUpCredentials();
-        if (!apiKey) {
-          throw new AppError("Cadastre a API key da SumUp antes de ativá-la.", 422);
-        }
-      }
-      if (provider === PAYMENT_PROVIDERS.MERCADO_PAGO && !process.env.MP_ACCESS_TOKEN) {
-        throw new AppError("Mercado Pago sem MP_ACCESS_TOKEN no servidor.", 422);
-      }
-      await this.appSettingRepository.set(PROVIDER_KEY, provider);
+    if (terminalProvider !== undefined) {
+      await this.#setProvider("terminal", terminalProvider);
+    }
+    if (onlineProvider !== undefined) {
+      await this.#setProvider("online", onlineProvider);
     }
 
     return this.getAdminSettings();
+  }
+
+  async #setProvider(channel, provider) {
+    if (!PAYMENT_PROVIDERS[provider]) {
+      throw new AppError("Banco de pagamento inválido.", 422);
+    }
+    if (provider === PAYMENT_PROVIDERS.SUMUP) {
+      const { apiKey } = await this.getSumUpCredentials();
+      if (!apiKey) {
+        throw new AppError("Cadastre a API key da SumUp antes de ativá-la.", 422);
+      }
+    }
+    if (provider === PAYMENT_PROVIDERS.MERCADO_PAGO && !process.env.MP_ACCESS_TOKEN) {
+      throw new AppError("Mercado Pago sem MP_ACCESS_TOKEN no servidor.", 422);
+    }
+    await this.appSettingRepository.set(PROVIDER_KEYS[channel], provider);
   }
 
   async listSumUpOperators() {

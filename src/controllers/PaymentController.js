@@ -27,6 +27,39 @@ const paymentSettingsService = new PaymentSettingsService();
 const sumUpPaymentService = new SumUpPaymentService();
 
 export class PaymentController {
+  // Pagamento online do delivery pela SumUp: { method: "PIX" | "CARTAO" }.
+  async createSumUpOnlinePayment(req, res, next) {
+    try {
+      const { orderId, method } = req.body;
+      if (!orderId) throw new AppError("orderId obrigatório.", 422);
+      if (!["PIX", "CARTAO"].includes(method)) {
+        throw new AppError("Forma de pagamento inválida.", 422);
+      }
+
+      const order = await orderRepository.findById(orderId);
+      if (!order) throw new AppError("Pedido não encontrado.", 404);
+      if (order.userId !== req.user.id && req.user.role !== "ADMIN") {
+        throw new AppError("Acesso negado.", 403);
+      }
+      if (order.paymentStatus === "APROVADO") {
+        throw new AppError("Pedido já pago.", 409);
+      }
+
+      const provider = await paymentSettingsService.getProvider("online");
+      if (provider !== PAYMENT_PROVIDERS.SUMUP) {
+        throw new AppError("O pagamento online não está configurado para a SumUp.", 422);
+      }
+
+      const data =
+        method === "PIX"
+          ? await sumUpPaymentService.startOnlinePix(order)
+          : await sumUpPaymentService.startOnlineCard(order);
+      return res.status(200).json({ data });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
   async createPreference(req, res, next) {
     try {
       const { orderId } = req.body;
@@ -187,7 +220,7 @@ export class PaymentController {
         throw new AppError("Pedido já pago.", 409);
       }
 
-      const provider = await paymentSettingsService.getActiveProvider();
+      const provider = await paymentSettingsService.getProvider("terminal");
       if (provider === PAYMENT_PROVIDERS.SUMUP) {
         const mesa = await mesaRepository.findById(order.mesaId);
         if (!mesa?.terminalId) {
@@ -368,7 +401,7 @@ export class PaymentController {
 
       if (!terminalId) throw new AppError("Totem sem maquininha configurada.", 422);
 
-      const provider = await paymentSettingsService.getActiveProvider();
+      const provider = await paymentSettingsService.getProvider("terminal");
       if (provider === PAYMENT_PROVIDERS.SUMUP) {
         const data = await sumUpPaymentService.startTerminalCharge(
           order,

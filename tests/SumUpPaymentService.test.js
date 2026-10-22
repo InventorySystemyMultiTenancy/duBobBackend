@@ -8,7 +8,7 @@ import { SumUpPaymentService } from "../src/services/SumUpPaymentService.js";
 
 const MINUTE = 60 * 1000;
 
-function buildService({ orders, transactions, knownExternalIds = [] }) {
+function buildService({ orders, transactions = [], checkouts = {}, knownExternalIds = [] }) {
   const orderRepository = {
     findAwaitingSumUpOrders: vi.fn().mockResolvedValue(orders),
     updatePaymentStatus: vi.fn(),
@@ -20,6 +20,7 @@ function buildService({ orders, transactions, knownExternalIds = [] }) {
   };
   const client = {
     listSuccessfulTransactions: vi.fn().mockResolvedValue(transactions),
+    getCheckout: vi.fn(async (id) => checkouts[id]),
   };
   const paymentSettingsService = {
     requireSumUpClient: vi.fn().mockResolvedValue({ client, merchantCode: "MC1" }),
@@ -104,5 +105,49 @@ describe("SumUpPaymentService.syncAwaitingOrders", () => {
     });
 
     expect(await service.syncAwaitingOrders()).toBeNull();
+  });
+});
+
+const checkoutIntent = (id, createdAt) => `sumup-checkout:${id}:${createdAt}`;
+
+describe("SumUpPaymentService online (checkout)", () => {
+  it("aprova o pedido quando o checkout está PAID com o mesmo valor", async () => {
+    const { service, orderRepository, paymentRepository } = buildService({
+      orders: [{ id: "A", total: "42.50", terminalIntentId: checkoutIntent("ck1", Date.now()) }],
+      checkouts: {
+        ck1: {
+          id: "ck1",
+          status: "PAID",
+          amount: 42.5,
+          transactions: [{ id: "tx9", status: "SUCCESSFUL" }],
+        },
+      },
+    });
+
+    expect(await service.syncAwaitingOrders()).toBe(1);
+    expect(orderRepository.updatePaymentStatus).toHaveBeenCalledWith("A", "APROVADO");
+    expect(paymentRepository.upsertFromWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ externalId: "sumup:tx9", provider: "SUMUP" }),
+    );
+  });
+
+  it("não aprova checkout pago com valor diferente", async () => {
+    const { service, orderRepository } = buildService({
+      orders: [{ id: "A", total: "42.50", terminalIntentId: checkoutIntent("ck1", Date.now()) }],
+      checkouts: { ck1: { id: "ck1", status: "PAID", amount: 1 } },
+    });
+
+    expect(await service.syncAwaitingOrders()).toBe(0);
+    expect(orderRepository.updatePaymentStatus).not.toHaveBeenCalled();
+  });
+
+  it("recusa o pedido quando o checkout expira", async () => {
+    const { service, orderRepository } = buildService({
+      orders: [{ id: "A", total: "10.00", terminalIntentId: checkoutIntent("ck1", Date.now()) }],
+      checkouts: { ck1: { id: "ck1", status: "EXPIRED", amount: 10 } },
+    });
+
+    expect(await service.syncAwaitingOrders()).toBe(0);
+    expect(orderRepository.updatePaymentStatus).toHaveBeenCalledWith("A", "RECUSADO");
   });
 });
