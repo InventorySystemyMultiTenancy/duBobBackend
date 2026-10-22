@@ -9,12 +9,22 @@ import { MesaRepository } from "../repositories/MesaRepository.js";
 import { AppSettingRepository } from "../repositories/AppSettingRepository.js";
 import { TotemService } from "../services/TotemService.js";
 import { OrderService } from "../services/OrderService.js";
+import {
+  PaymentSettingsService,
+  PAYMENT_PROVIDERS,
+} from "../services/PaymentSettingsService.js";
+import {
+  SumUpPaymentService,
+  isSumUpIntent,
+} from "../services/SumUpPaymentService.js";
 
 const orderRepository = new OrderRepository();
 const mesaRepository = new MesaRepository();
 const appSettingRepository = new AppSettingRepository();
 const totemService = new TotemService();
 const orderService = new OrderService();
+const paymentSettingsService = new PaymentSettingsService();
+const sumUpPaymentService = new SumUpPaymentService();
 
 export class PaymentController {
   async createPreference(req, res, next) {
@@ -177,9 +187,23 @@ export class PaymentController {
         throw new AppError("Pedido já pago.", 409);
       }
 
+      const provider = await paymentSettingsService.getActiveProvider();
+      if (provider === PAYMENT_PROVIDERS.SUMUP) {
+        const mesa = await mesaRepository.findById(order.mesaId);
+        if (!mesa?.terminalId) {
+          throw new AppError("Mesa sem maquininha configurada.", 422);
+        }
+        const data = await sumUpPaymentService.startTerminalCheckout(
+          order,
+          mesa.terminalId,
+          `Pedido Mesa ${mesa.number} #${order.id.slice(-6).toUpperCase()}`,
+        );
+        return res.status(200).json({ data });
+      }
+
       // Se já existe um terminalIntentId salvo, cancela a cobrança anterior
       // antes de criar uma nova — evita múltiplas cobranças na maquininha.
-      if (order.terminalIntentId) {
+      if (order.terminalIntentId && !isSumUpIntent(order.terminalIntentId)) {
         const mpToken0 = process.env.MP_ACCESS_TOKEN;
         if (mpToken0) {
           try {
@@ -329,7 +353,32 @@ export class PaymentController {
         throw new AppError("Pedido já pago.", 409);
       }
 
-      if (order.terminalIntentId) {
+      const totem =
+        totemId || totemSlug
+          ? await totemService.findByPaymentRef({ totemId, totemSlug })
+          : null;
+      let terminalId = totem?.terminalId?.trim();
+
+      if (!terminalId) {
+        const terminalSetting = await appSettingRepository.get(
+          "totem_terminal_id",
+        );
+        terminalId = terminalSetting?.value?.trim();
+      }
+
+      if (!terminalId) throw new AppError("Totem sem maquininha configurada.", 422);
+
+      const provider = await paymentSettingsService.getActiveProvider();
+      if (provider === PAYMENT_PROVIDERS.SUMUP) {
+        const data = await sumUpPaymentService.startTerminalCheckout(
+          order,
+          terminalId,
+          `Pedido ${totem?.name ?? "Totem"} #${order.id.slice(-6).toUpperCase()}`,
+        );
+        return res.status(200).json({ data });
+      }
+
+      if (order.terminalIntentId && !isSumUpIntent(order.terminalIntentId)) {
         const mpToken0 = process.env.MP_ACCESS_TOKEN;
         if (mpToken0) {
           try {
@@ -360,21 +409,6 @@ export class PaymentController {
           }
         }
       }
-
-      const totem =
-        totemId || totemSlug
-          ? await totemService.findByPaymentRef({ totemId, totemSlug })
-          : null;
-      let terminalId = totem?.terminalId?.trim();
-
-      if (!terminalId) {
-        const terminalSetting = await appSettingRepository.get(
-          "totem_terminal_id",
-        );
-        terminalId = terminalSetting?.value?.trim();
-      }
-
-      if (!terminalId) throw new AppError("Totem sem maquininha configurada.", 422);
 
       const mpToken = process.env.MP_ACCESS_TOKEN;
       if (!mpToken) throw new AppError("Mercado Pago não configurado.", 500);
@@ -463,7 +497,16 @@ export class PaymentController {
         return res.status(200).json({ data: order, message: "Pedido já cancelado." });
       }
 
-      if (order.terminalIntentId) {
+      if (isSumUpIntent(order.terminalIntentId)) {
+        const canCancel =
+          await sumUpPaymentService.tryCancelBeforeOrderCancel(order);
+        if (!canCancel) {
+          throw new AppError(
+            "Não foi possível cancelar na maquininha. Cancele na própria maquininha ou chame um atendente.",
+            409,
+          );
+        }
+      } else if (order.terminalIntentId) {
         const mpToken = process.env.MP_ACCESS_TOKEN;
         if (!mpToken) throw new AppError("Mercado Pago não configurado.", 500);
 

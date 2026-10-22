@@ -441,6 +441,18 @@ export class OrderRepository {
     return rows[0] ?? null;
   }
 
+  async findBySumUpClientTransactionId(clientTransactionId) {
+    const rows = await prisma.$queryRaw`
+      SELECT id, "terminalIntentId"
+      FROM "Order"
+      WHERE "terminalIntentId" LIKE 'sumup:%'
+        AND "terminalIntentId" LIKE ${"%:" + clientTransactionId}
+      ORDER BY "updatedAt" DESC
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+
   /**
    * Busca o pedido pendente mais recente da maquininha (terminalIntentId não nulo)
    * cujo total bate com o valor do pagamento aprovado.
@@ -453,6 +465,7 @@ export class OrderRepository {
       FROM "Order"
       WHERE "paymentStatus" = 'PENDENTE'
         AND "terminalIntentId" IS NOT NULL
+        AND "terminalIntentId" NOT LIKE 'sumup:%'
         AND ROUND(total::numeric, 2) = ${parseFloat(amountDecimal)}
         AND "createdAt" >= NOW() - INTERVAL '24 hours'
       ORDER BY "createdAt" DESC

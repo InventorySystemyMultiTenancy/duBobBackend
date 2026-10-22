@@ -23,6 +23,8 @@ import { DeliveryService } from "./services/DeliveryService.js";
 import { deliveryFreightSchema } from "./validators/orderSchemas.js";
 import { emitChamarGarcom } from "./realtime/socketServer.js";
 import { AppSettingRepository } from "./repositories/AppSettingRepository.js";
+import { PaymentSettingsService } from "./services/PaymentSettingsService.js";
+import { SumUpPaymentService } from "./services/SumUpPaymentService.js";
 
 // ── Variáveis de ambiente críticas ───────────────────────────────────────────
 const REQUIRED_ENV = ["JWT_SECRET", "DATABASE_URL"];
@@ -53,6 +55,8 @@ const comandaController = new ComandaController();
 const totemController = new TotemController();
 const expenseController = new ExpenseController();
 const appSettingRepository = new AppSettingRepository();
+const paymentSettingsService = new PaymentSettingsService();
+const sumUpPaymentService = new SumUpPaymentService();
 
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173")
   .split(",")
@@ -523,6 +527,15 @@ app.post("/api/payments/webhook", (req, res, next) =>
   orderController.paymentWebhook(req, res, next),
 );
 
+// Webhook da SumUp (return_url da cobrança na maquininha). O status é sempre
+// reconsultado na API da SumUp, então o corpo recebido não é confiado.
+app.post("/api/payments/sumup/webhook", (req, res) => {
+  res.status(200).json({ message: "OK" });
+  sumUpPaymentService.handleWebhook(req.body).catch((err) => {
+    console.error("[SumUp webhook] Erro ao processar:", err.message);
+  });
+});
+
 // MP IPN validation — sends GET to confirm the endpoint is alive
 app.get("/api/payments/webhook", (_req, res) => {
   return res.status(200).json({ status: "ok" });
@@ -570,6 +583,71 @@ app.put(
         message: "Maquininha do Totem atualizada.",
         data: { terminalId },
       });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+// Configuração de pagamento: qual banco cobra nas maquininhas
+app.get(
+  "/api/admin/settings/payment",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (_req, res, next) => {
+    try {
+      const data = await paymentSettingsService.getAdminSettings();
+      return res.status(200).json({ data });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+app.put(
+  "/api/admin/settings/payment",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const data = await paymentSettingsService.updateAdminSettings({
+        provider: req.body?.provider,
+        sumupApiKey: req.body?.sumupApiKey,
+      });
+      return res
+        .status(200)
+        .json({ message: "Configuração de pagamento salva.", data });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+app.get(
+  "/api/admin/settings/payment/sumup/readers",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (_req, res, next) => {
+    try {
+      const data = await paymentSettingsService.listSumUpReaders();
+      return res.status(200).json({ data });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+app.post(
+  "/api/admin/settings/payment/sumup/readers",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const data = await paymentSettingsService.pairSumUpReader({
+        pairingCode: req.body?.pairingCode,
+        name: req.body?.name,
+      });
+      return res.status(201).json({ message: "Maquininha pareada.", data });
     } catch (err) {
       return next(err);
     }
