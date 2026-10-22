@@ -25,6 +25,7 @@ import { emitChamarGarcom } from "./realtime/socketServer.js";
 import { AppSettingRepository } from "./repositories/AppSettingRepository.js";
 import { PaymentSettingsService } from "./services/PaymentSettingsService.js";
 import { SumUpPaymentService } from "./services/SumUpPaymentService.js";
+import { StonePaymentService } from "./services/StonePaymentService.js";
 
 // ── Variáveis de ambiente críticas ───────────────────────────────────────────
 const REQUIRED_ENV = ["JWT_SECRET", "DATABASE_URL"];
@@ -532,6 +533,20 @@ app.post("/api/payments/webhook", (req, res, next) =>
   orderController.paymentWebhook(req, res, next),
 );
 
+// Webhook da Stone (charge.paid). Só indica qual pedido consultar: o status
+// vem sempre da API da Stone.
+const stonePaymentService = new StonePaymentService();
+stonePaymentService
+  .syncAwaitingOrders()
+  .then((matched) => matched !== null && stonePaymentService.ensurePolling())
+  .catch(() => {});
+app.post("/api/payments/stone/webhook", (req, res) => {
+  res.status(200).json({ message: "OK" });
+  stonePaymentService.handleWebhook(req.body).catch((err) => {
+    console.error("[Stone webhook] Erro ao processar:", err.message);
+  });
+});
+
 // MP IPN validation — sends GET to confirm the endpoint is alive
 app.get("/api/payments/webhook", (_req, res) => {
   return res.status(200).json({ status: "ok" });
@@ -626,6 +641,9 @@ app.put(
       const data = await paymentSettingsService.updateAdminSettings({
         terminalProvider: req.body?.terminalProvider,
         onlineProvider: req.body?.onlineProvider,
+        stoneSecretKey: req.body?.stoneSecretKey,
+        stoneServiceRefererName: req.body?.stoneServiceRefererName,
+        stonePaymentType: req.body?.stonePaymentType,
         sumupApiKey: req.body?.sumupApiKey,
       });
       return res

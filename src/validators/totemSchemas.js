@@ -6,6 +6,7 @@ export const createTotemSchema = z.object({
   terminalId: z.string().min(1).max(100).optional(),
   voiceEnabled: z.boolean().optional(),
   sumupOperatorId: z.string().min(1).max(100).nullable().optional(),
+  stoneSerialNumber: z.string().min(1).max(100).nullable().optional(),
 });
 
 export const updateTotemSchema = z.object({
@@ -15,4 +16,5 @@ export const updateTotemSchema = z.object({
   isActive: z.boolean().optional(),
   voiceEnabled: z.boolean().optional(),
   sumupOperatorId: z.string().min(1).max(100).nullable().optional(),
+  stoneSerialNumber: z.string().min(1).max(100).nullable().optional(),
 });

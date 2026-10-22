@@ -12,6 +12,7 @@ function mapTotem(row) {
     isActive: row.isActive,
     voiceEnabled: Boolean(row.voiceEnabled),
     sumupOperatorId: row.sumupOperatorId ?? null,
+    stoneSerialNumber: row.stoneSerialNumber ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -47,6 +48,10 @@ export class TotemRepository {
     await prisma.$executeRaw`
       ALTER TABLE "Totem" ADD COLUMN IF NOT EXISTS "sumupOperatorId" TEXT
     `;
+    // Número de série da maquininha Stone do totem.
+    await prisma.$executeRaw`
+      ALTER TABLE "Totem" ADD COLUMN IF NOT EXISTS "stoneSerialNumber" TEXT
+    `;
   }
 
   async create({
@@ -56,11 +61,12 @@ export class TotemRepository {
     terminalId,
     voiceEnabled = false,
     sumupOperatorId = null,
+    stoneSerialNumber = null,
   }) {
     await this.ensureTable();
     const rows = await prisma.$queryRaw`
-      INSERT INTO "Totem" ("id", "name", "number", "slug", "terminalId", "voiceEnabled", "sumupOperatorId", "updatedAt")
-      VALUES (${randomUUID()}, ${name}, ${number}, ${slug}, ${terminalId}, ${voiceEnabled}, ${sumupOperatorId}, NOW())
+      INSERT INTO "Totem" ("id", "name", "number", "slug", "terminalId", "voiceEnabled", "sumupOperatorId", "stoneSerialNumber", "updatedAt")
+      VALUES (${randomUUID()}, ${name}, ${number}, ${slug}, ${terminalId}, ${voiceEnabled}, ${sumupOperatorId}, ${stoneSerialNumber}, NOW())
       RETURNING *
     `;
     return mapTotem(rows[0]);
@@ -115,6 +121,10 @@ export class TotemRepository {
         Object.prototype.hasOwnProperty.call(data, "sumupOperatorId")
           ? data.sumupOperatorId
           : current.sumupOperatorId,
+      stoneSerialNumber:
+        Object.prototype.hasOwnProperty.call(data, "stoneSerialNumber")
+          ? data.stoneSerialNumber
+          : current.stoneSerialNumber,
     };
 
     const rows = await prisma.$queryRaw`
@@ -127,6 +137,7 @@ export class TotemRepository {
         "isActive" = ${next.isActive},
         "voiceEnabled" = ${next.voiceEnabled},
         "sumupOperatorId" = ${next.sumupOperatorId},
+        "stoneSerialNumber" = ${next.stoneSerialNumber},
         "updatedAt" = NOW()
       WHERE "id" = ${id}
       RETURNING *

@@ -2,13 +2,26 @@ import crypto from "crypto";
 import { AppError } from "../errors/AppError.js";
 import { AppSettingRepository } from "../repositories/AppSettingRepository.js";
 import { SumUpClient } from "./SumUpClient.js";
+import { StoneClient } from "./StoneClient.js";
 import { SumUpOperatorRepository } from "../repositories/SumUpOperatorRepository.js";
 import { decryptSecret, encryptSecret } from "../lib/secretBox.js";
 
 export const PAYMENT_PROVIDERS = {
   MERCADO_PAGO: "MERCADO_PAGO",
   SUMUP: "SUMUP",
+  STONE: "STONE",
 };
+
+// Bancos aceitos em cada canal (a Stone por enquanto só na maquininha).
+const CHANNEL_PROVIDERS = {
+  terminal: ["MERCADO_PAGO", "SUMUP", "STONE"],
+  online: ["MERCADO_PAGO", "SUMUP"],
+};
+
+const STONE_SECRET_KEY = "stone_secret_key";
+const STONE_REFERER_KEY = "stone_service_referer_name";
+const STONE_PAYMENT_TYPE_KEY = "stone_payment_type";
+const STONE_PAYMENT_TYPES = ["", "debit", "credit", "voucher", "pix"];
 
 // "payment_provider" é o nome antigo da chave da maquininha; mantido para
 // não perder a escolha já salva.
@@ -84,15 +97,51 @@ export class PaymentSettingsService {
     };
   }
 
+  // Secret Key da Account Stone e o ServiceRefererName de parceiro: os do
+  // painel têm prioridade; o .env fica de reserva.
+  async getStoneCredentials() {
+    const [keySetting, refererSetting, typeSetting] = await Promise.all([
+      this.appSettingRepository.get(STONE_SECRET_KEY),
+      this.appSettingRepository.get(STONE_REFERER_KEY),
+      this.appSettingRepository.get(STONE_PAYMENT_TYPE_KEY),
+    ]);
+    const dbKey = keySetting?.value?.trim();
+    const envKey = process.env.STONE_SECRET_KEY?.trim();
+    return {
+      secretKey: dbKey || envKey || "",
+      source: dbKey ? "painel" : envKey ? "env" : null,
+      serviceRefererName:
+        refererSetting?.value?.trim() || process.env.STONE_SERVICE_REFERER_NAME?.trim() || "",
+      paymentType: STONE_PAYMENT_TYPES.includes(typeSetting?.value) ? typeSetting.value : "",
+    };
+  }
+
+  async requireStoneClient() {
+    const { secretKey, serviceRefererName, paymentType } = await this.getStoneCredentials();
+    if (!secretKey) throw new AppError("Stone não configurada.", 500);
+    return {
+      client: new StoneClient(secretKey, serviceRefererName),
+      paymentType: paymentType || null,
+    };
+  }
+
   async getAdminSettings() {
-    const [terminalProvider, onlineProvider, sumup] = await Promise.all([
+    const [terminalProvider, onlineProvider, sumup, stone] = await Promise.all([
       this.getProvider("terminal"),
       this.getProvider("online"),
       this.getSumUpCredentials(),
+      this.getStoneCredentials(),
     ]);
     return {
       terminalProvider,
       onlineProvider,
+      stone: {
+        configured: Boolean(stone.secretKey),
+        secretKeyMasked: maskSecret(stone.secretKey),
+        source: stone.source,
+        serviceRefererName: stone.serviceRefererName,
+        paymentType: stone.paymentType,
+      },
       mercadoPago: { configured: Boolean(process.env.MP_ACCESS_TOKEN) },
       sumup: {
         configured: Boolean(sumup.apiKey),
@@ -103,7 +152,35 @@ export class PaymentSettingsService {
     };
   }
 
-  async updateAdminSettings({ terminalProvider, onlineProvider, sumupApiKey }) {
+  async updateAdminSettings({
+    terminalProvider,
+    onlineProvider,
+    sumupApiKey,
+    stoneSecretKey,
+    stoneServiceRefererName,
+    stonePaymentType,
+  }) {
+    if (stoneServiceRefererName !== undefined) {
+      await this.appSettingRepository.set(
+        STONE_REFERER_KEY,
+        String(stoneServiceRefererName ?? "").trim(),
+      );
+    }
+    if (stonePaymentType !== undefined) {
+      if (!STONE_PAYMENT_TYPES.includes(stonePaymentType ?? "")) {
+        throw new AppError("Forma de pagamento da Stone inválida.", 422);
+      }
+      await this.appSettingRepository.set(STONE_PAYMENT_TYPE_KEY, stonePaymentType ?? "");
+    }
+    if (stoneSecretKey !== undefined) {
+      const secretKey = String(stoneSecretKey ?? "").trim();
+      if (secretKey) {
+        const { serviceRefererName } = await this.getStoneCredentials();
+        await new StoneClient(secretKey, serviceRefererName).testKey();
+      }
+      await this.appSettingRepository.set(STONE_SECRET_KEY, secretKey);
+    }
+
     if (sumupApiKey !== undefined) {
       const apiKey = String(sumupApiKey ?? "").trim();
       if (apiKey) {
@@ -128,8 +205,14 @@ export class PaymentSettingsService {
   }
 
   async #setProvider(channel, provider) {
-    if (!PAYMENT_PROVIDERS[provider]) {
-      throw new AppError("Banco de pagamento inválido.", 422);
+    if (!CHANNEL_PROVIDERS[channel].includes(provider)) {
+      throw new AppError("Banco de pagamento inválido para este canal.", 422);
+    }
+    if (provider === PAYMENT_PROVIDERS.STONE) {
+      const { secretKey } = await this.getStoneCredentials();
+      if (!secretKey) {
+        throw new AppError("Cadastre a Secret Key da Stone antes de ativá-la.", 422);
+      }
     }
     if (provider === PAYMENT_PROVIDERS.SUMUP) {
       const { apiKey } = await this.getSumUpCredentials();

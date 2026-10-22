@@ -10,6 +10,10 @@ import { AppSettingRepository } from "../repositories/AppSettingRepository.js";
 import { TotemService } from "../services/TotemService.js";
 import { OrderService } from "../services/OrderService.js";
 import {
+  StonePaymentService,
+  isStoneIntent,
+} from "../services/StonePaymentService.js";
+import {
   PaymentSettingsService,
   PAYMENT_PROVIDERS,
 } from "../services/PaymentSettingsService.js";
@@ -25,6 +29,7 @@ const totemService = new TotemService();
 const orderService = new OrderService();
 const paymentSettingsService = new PaymentSettingsService();
 const sumUpPaymentService = new SumUpPaymentService();
+const stonePaymentService = new StonePaymentService();
 
 export class PaymentController {
   // Pagamento online do delivery pela SumUp: { method: "PIX" | "CARTAO" }.
@@ -233,10 +238,27 @@ export class PaymentController {
         );
         return res.status(200).json({ data });
       }
+      if (provider === PAYMENT_PROVIDERS.STONE) {
+        const mesa = await mesaRepository.findById(order.mesaId);
+        if (!mesa?.terminalId) {
+          throw new AppError("Mesa sem maquininha configurada.", 422);
+        }
+        // Na Stone o "ID da maquininha" é o número de série dela.
+        const data = await stonePaymentService.startTerminalCharge(
+          order,
+          mesa.terminalId,
+          `Mesa ${mesa.number} #${order.id.slice(-6).toUpperCase()}`,
+        );
+        return res.status(200).json({ data });
+      }
 
       // Se já existe um terminalIntentId salvo, cancela a cobrança anterior
       // antes de criar uma nova — evita múltiplas cobranças na maquininha.
-      if (order.terminalIntentId && !isSumUpIntent(order.terminalIntentId)) {
+      if (
+        order.terminalIntentId &&
+        !isSumUpIntent(order.terminalIntentId) &&
+        !isStoneIntent(order.terminalIntentId)
+      ) {
         const mpToken0 = process.env.MP_ACCESS_TOKEN;
         if (mpToken0) {
           try {
@@ -391,6 +413,16 @@ export class PaymentController {
           ? await totemService.findByPaymentRef({ totemId, totemSlug })
           : null;
       const provider = await paymentSettingsService.getProvider("terminal");
+      if (provider === PAYMENT_PROVIDERS.STONE) {
+        const serial = totem?.stoneSerialNumber?.trim() || totem?.terminalId?.trim();
+        const data = await stonePaymentService.startTerminalCharge(
+          order,
+          serial,
+          `${totem?.name ?? "Totem"} #${order.id.slice(-6).toUpperCase()}`,
+        );
+        return res.status(200).json({ data });
+      }
+
       if (provider === PAYMENT_PROVIDERS.SUMUP && totem?.sumupOperatorId) {
         // Maquininha SumUp escolhida no cadastro do totem.
         const data = await sumUpPaymentService.startTerminalChargeForOperator(
@@ -419,7 +451,11 @@ export class PaymentController {
         return res.status(200).json({ data });
       }
 
-      if (order.terminalIntentId && !isSumUpIntent(order.terminalIntentId)) {
+      if (
+        order.terminalIntentId &&
+        !isSumUpIntent(order.terminalIntentId) &&
+        !isStoneIntent(order.terminalIntentId)
+      ) {
         const mpToken0 = process.env.MP_ACCESS_TOKEN;
         if (mpToken0) {
           try {
@@ -538,7 +574,20 @@ export class PaymentController {
         return res.status(200).json({ data: order, message: "Pedido já cancelado." });
       }
 
-      if (isSumUpIntent(order.terminalIntentId)) {
+      if (isStoneIntent(order.terminalIntentId)) {
+        // Tira o pedido da tela da maquininha Stone e confere se já foi pago
+        // antes de cancelar (a checagem abaixo barra se aprovou).
+        const closed = await stonePaymentService.cancelTerminalCharge(order);
+        if (!closed) {
+          throw new AppError(
+            "Não foi possível cancelar na maquininha. Cancele na própria maquininha ou chame um atendente.",
+            409,
+          );
+        }
+        await stonePaymentService.syncAwaitingOrders().catch((e) =>
+          console.warn("[cancelTotemTerminalPayment] Stone:", e.message),
+        );
+      } else if (isSumUpIntent(order.terminalIntentId)) {
         // Fecha a cobrança na tela da maquininha (se foi enviada) e confere se
         // a venda já entrou antes de cancelar (a checagem abaixo barra se aprovou).
         const closed = await sumUpPaymentService.cancelTerminalCharge(order);

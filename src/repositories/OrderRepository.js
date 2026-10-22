@@ -453,6 +453,29 @@ export class OrderRepository {
     `;
   }
 
+  // Pedidos esperando pagamento na maquininha Stone (ver StonePaymentService).
+  async findAwaitingStoneOrders() {
+    return prisma.$queryRaw`
+      SELECT id, "userId", total, "terminalIntentId"
+      FROM "Order"
+      WHERE "paymentStatus" = 'PENDENTE'
+        AND "status" <> 'CANCELADO'
+        AND "terminalIntentId" LIKE 'stone:%'
+        AND "createdAt" >= NOW() - INTERVAL '24 hours'
+    `;
+  }
+
+  async findByTerminalIntentPrefix(prefix) {
+    const rows = await prisma.$queryRaw`
+      SELECT id, "userId", total, "terminalIntentId", "paymentStatus"::text AS "paymentStatus"
+      FROM "Order"
+      WHERE "terminalIntentId" LIKE ${prefix + "%"}
+      ORDER BY "updatedAt" DESC
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+
   /**
    * Busca o pedido pendente mais recente da maquininha (terminalIntentId não nulo)
    * cujo total bate com o valor do pagamento aprovado.
@@ -466,6 +489,7 @@ export class OrderRepository {
       WHERE "paymentStatus" = 'PENDENTE'
         AND "terminalIntentId" IS NOT NULL
         AND "terminalIntentId" NOT LIKE 'sumup-%'
+        AND "terminalIntentId" NOT LIKE 'stone:%'
         AND ROUND(total::numeric, 2) = ${parseFloat(amountDecimal)}
         AND "createdAt" >= NOW() - INTERVAL '24 hours'
       ORDER BY "createdAt" DESC
