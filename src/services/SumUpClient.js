@@ -77,8 +77,29 @@ export class SumUpClient {
     }
   }
 
-  // Pareia um reader na Cloud API. O pairing_code aparece NO APARELHO:
-  // Menu > Conexões > Wi-Fi > API > Conectar (vale 5 minutos).
+  // Readers já conectados à conta. Com a maquininha logada, o "Conectar" da
+  // Cloud API liga direto na conta, sem mostrar código: ela aparece aqui.
+  async listReaders(merchantCode) {
+    const data = await this.request("GET", `/v0.1/merchants/${merchantCode}/readers`);
+    const items = Array.isArray(data) ? data : (data.items ?? data.readers ?? data.data ?? []);
+    return items.map((item) => ({
+      id: String(item.id ?? item.reader_id),
+      name: item.name ?? null,
+      status: item.status ?? null,
+      serial: item.device?.identifier ?? null,
+      model: item.device?.model ?? null,
+      createdAt: item.created_at ?? null,
+    }));
+  }
+
+  // Remove o reader da conta. Depois é preciso desconectar no aparelho:
+  // Menu > Conexões > API > Desconectar.
+  async deleteReader(merchantCode, readerId) {
+    await this.request("DELETE", `/v0.1/merchants/${merchantCode}/readers/${readerId}`);
+  }
+
+  // Pareia um reader na Cloud API. O pairing_code aparece NO APARELHO, com
+  // ele deslogado: Menu > Conexões > Wi-Fi > API > Conectar (vale 5 minutos).
   async createReader(merchantCode, pairingCode, name) {
     const data = await this.request("POST", `/v0.1/merchants/${merchantCode}/readers`, {
       pairing_code: pairingCode,

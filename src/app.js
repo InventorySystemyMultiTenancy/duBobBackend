@@ -687,7 +687,39 @@ app.get(
   },
 );
 
-// Pareia o reader da maquininha para o totem/caixa enviar a cobrança a ela.
+// Readers já conectados à conta SumUp (para vincular sem código).
+app.get(
+  "/api/admin/settings/payment/sumup/readers",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (_req, res, next) => {
+    try {
+      const data = await paymentSettingsService.listSumUpReaders();
+      return res.status(200).json({ data });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+app.delete(
+  "/api/admin/settings/payment/sumup/readers/:readerId",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  async (req, res, next) => {
+    try {
+      await paymentSettingsService.forgetSumUpReader(req.params.readerId);
+      return res.status(200).json({
+        message: "Maquininha esquecida. Desconecte também no aparelho.",
+      });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
+// Pareia o reader da maquininha para o totem/caixa enviar a cobrança a ela:
+// { pairingCode } ou { readerId } de um reader já conectado à conta.
 app.post(
   "/api/admin/settings/payment/sumup/operators/:operatorId/reader",
   authenticateToken,
@@ -696,7 +728,7 @@ app.post(
     try {
       const data = await paymentSettingsService.pairSumUpOperatorReader(
         req.params.operatorId,
-        req.body?.pairingCode,
+        { pairingCode: req.body?.pairingCode, readerId: req.body?.readerId },
       );
       return res.status(200).json({ message: "Maquininha pareada.", data });
     } catch (err) {

@@ -182,16 +182,42 @@ export class PaymentSettingsService {
 
   // Pareia o reader físico desta maquininha para o totem/caixa enviar a
   // cobrança direto para a tela dela.
-  async pairSumUpOperatorReader(id, pairingCode) {
-    const code = String(pairingCode ?? "").trim().toUpperCase();
-    if (!code) throw new AppError("Informe o código que aparece na maquininha.", 422);
+  // Vincula pelo código de pareamento OU escolhendo um reader que já está
+  // conectado à conta (quando o "Conectar" da maquininha liga direto).
+  async pairSumUpOperatorReader(id, { pairingCode, readerId }) {
     const operator = await this.sumUpOperatorRepository.findById(id);
     if (!operator) throw new AppError("Maquininha não encontrada.", 404);
-
     const { client, merchantCode } = await this.requireSumUpClient();
+
+    const existingId = String(readerId ?? "").trim();
+    if (existingId) {
+      const readers = await client.listReaders(merchantCode);
+      const reader = readers.find((item) => item.id === existingId);
+      if (!reader) throw new AppError("Maquininha não encontrada na conta SumUp.", 404);
+      await this.sumUpOperatorRepository.setReaderId(id, reader.id);
+      return { readerId: reader.id, status: reader.status };
+    }
+
+    const code = String(pairingCode ?? "").trim().toUpperCase();
+    if (!code) throw new AppError("Informe o código ou escolha a maquininha.", 422);
     const reader = await client.createReader(merchantCode, code, operator.name);
     await this.sumUpOperatorRepository.setReaderId(id, reader.id);
     return { readerId: reader.id, status: reader.status };
+  }
+
+  async listSumUpReaders() {
+    const { client, merchantCode } = await this.requireSumUpClient();
+    return client.listReaders(merchantCode);
+  }
+
+  // Esquece o reader na conta SumUp e solta das maquininhas que o usavam.
+  async forgetSumUpReader(readerId) {
+    const { client, merchantCode } = await this.requireSumUpClient();
+    await client.deleteReader(merchantCode, readerId);
+    const operators = await this.sumUpOperatorRepository.findAll();
+    for (const operator of operators.filter((item) => item.readerId === readerId)) {
+      await this.sumUpOperatorRepository.setReaderId(operator.id, null);
+    }
   }
 
   async unpairSumUpOperatorReader(id) {
