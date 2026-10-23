@@ -61,6 +61,20 @@ const startOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1);
 const isMercadoPagoInternalReference = (value) =>
   !!value && /^INSTORE-/i.test(String(value));
 
+// Categorias de produto cobradas como adicional dentro do item do pedido.
+const PAID_COMPLEMENT_CATEGORIES = [
+  "complemento milkshake",
+  "complemento acai premium",
+];
+
+function isPaidComplementCategory(category) {
+  const normalized = String(category ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+  return PAID_COMPLEMENT_CATEGORIES.some((needle) => normalized.includes(needle));
+}
+
 export class OrderService {
   constructor(
     orderRepository = new OrderRepository(),
@@ -1460,20 +1474,40 @@ export class OrderService {
         },
       });
 
-      if (addonRows.length !== addonIds.length) {
+      // Complementos pagos (milk shake e açaí premium) são produtos de
+      // categoria própria: o preço vem do tamanho cadastrado no admin.
+      const foundAddonIds = new Set(addonRows.map((addon) => addon.id));
+      const complementIds = addonIds.filter((id) => !foundAddonIds.has(id));
+      const complementRows = complementIds.length
+        ? await tx.product.findMany({
+            where: { id: { in: complementIds }, isActive: true },
+            include: { sizes: { orderBy: { price: "asc" }, take: 1 } },
+          })
+        : [];
+      const paidComplements = complementRows.filter(
+        (row) =>
+          isPaidComplementCategory(row.category) &&
+          row.sizes?.[0]?.price != null,
+      );
+
+      if (addonRows.length + paidComplements.length !== addonIds.length) {
         throw new AppError("Um ou mais adicionais são inválidos.", 422);
       }
 
-      addons = addonRows.map((addon) => ({
-        id: addon.id,
-        name: addon.name,
-        price: Number(addon.price),
-      }));
+      addons = [
+        ...addonRows.map((addon) => ({
+          id: addon.id,
+          name: addon.name,
+          price: Number(addon.price),
+        })),
+        ...paidComplements.map((row) => ({
+          id: row.id,
+          name: row.name,
+          price: Number(row.sizes[0].price),
+        })),
+      ];
 
-      addonsCents = addonRows.reduce(
-        (sum, addon) => sum + toCents(addon.price),
-        0,
-      );
+      addonsCents = addons.reduce((sum, addon) => sum + toCents(addon.price), 0);
     }
 
     const unitPriceCents = toCents(basePrice) + addonsCents;

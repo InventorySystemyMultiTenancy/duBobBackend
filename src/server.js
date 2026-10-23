@@ -35,6 +35,19 @@ async function runMigrations() {
     `INSERT INTO "Addon" ("id", "name", "price", "isActive", "createdAt", "updatedAt")
       VALUES ('db_addon_acai_extra_complementos', '4 complementos extras', 5.00, true, NOW(), NOW())
       ON CONFLICT ("id") DO NOTHING`,
+    // Complementos do milk shake (R$ 3,00 cada, preço editável no admin).
+    `INSERT INTO "Product" ("id", "name", "category", "isActive", "createdAt", "updatedAt")
+      VALUES
+        ('db_mscomp_leite_ninho', 'Leite Ninho', 'complemento milkshake', true, NOW(), NOW()),
+        ('db_mscomp_ovomaltine', 'Ovomaltine', 'complemento milkshake', true, NOW(), NOW()),
+        ('db_mscomp_pacoquinha', 'Paçoquinha', 'complemento milkshake', true, NOW(), NOW()),
+        ('db_mscomp_leite_condensado', 'Leite Condensado', 'complemento milkshake', true, NOW(), NOW())
+      ON CONFLICT ("id") DO NOTHING`,
+    `INSERT INTO "ProductSize" ("id", "productId", "size", "label", "price", "createdAt", "updatedAt")
+      SELECT 'size_' || p."id", p."id", 'PEQUENA', 'Adicional', 3.00, NOW(), NOW()
+      FROM "Product" p
+      WHERE p."id" IN ('db_mscomp_leite_ninho', 'db_mscomp_ovomaltine', 'db_mscomp_pacoquinha', 'db_mscomp_leite_condensado')
+      ON CONFLICT ("productId", "size") DO NOTHING`,
     `DO $$
       BEGIN
         IF NOT EXISTS (
