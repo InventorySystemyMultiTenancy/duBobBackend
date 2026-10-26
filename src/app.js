@@ -26,6 +26,7 @@ import { AppSettingRepository } from "./repositories/AppSettingRepository.js";
 import { PaymentSettingsService } from "./services/PaymentSettingsService.js";
 import { SumUpPaymentService } from "./services/SumUpPaymentService.js";
 import { StonePaymentService } from "./services/StonePaymentService.js";
+import { whatsappService } from "./services/WhatsappService.js";
 
 // ── Variáveis de ambiente críticas ───────────────────────────────────────────
 const REQUIRED_ENV = ["JWT_SECRET", "DATABASE_URL"];
@@ -624,6 +625,61 @@ app.put(
     }
   },
 );
+
+// Avisos de WhatsApp do delivery (Evolution API)
+const whatsappRoute = (handler) => async (req, res, next) => {
+  try {
+    return res.status(200).json({ data: await handler(req) });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+app.get(
+  "/api/admin/whatsapp",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  whatsappRoute(() => whatsappService.getStatus()),
+);
+
+app.put(
+  "/api/admin/whatsapp",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  whatsappRoute((req) => whatsappService.updateConfig(req.body ?? {})),
+);
+
+app.post(
+  "/api/admin/whatsapp/conectar",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  whatsappRoute((req) =>
+    whatsappService.conectar({
+      webhookBaseUrl:
+        process.env.PUBLIC_API_URL || `${req.protocol}://${req.get("host")}`,
+    }),
+  ),
+);
+
+app.post(
+  "/api/admin/whatsapp/teste",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  whatsappRoute((req) => whatsappService.enviarTeste(req.body?.telefone)),
+);
+
+// Respostas dos clientes (Evolution chama aqui); o token secreto fica na URL
+app.post("/api/whatsapp/webhook/:token", async (req, res) => {
+  try {
+    if (!(await whatsappService.validarWebhookToken(req.params.token))) {
+      return res.status(404).json({ message: "Não encontrado." });
+    }
+    await whatsappService.receberWebhook(req.body);
+  } catch (err) {
+    console.error("[whatsapp] webhook:", err.message);
+  }
+  return res.status(200).json({ ok: true });
+});
 
 // Configuração de pagamento: qual banco cobra nas maquininhas
 app.get(

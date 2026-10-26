@@ -1,8 +1,9 @@
 import dotenv from "dotenv";
 import http from "http";
 import { app } from "./app.js";
-import { initializeSocketServer } from "./realtime/socketServer.js";
+import { initializeSocketServer, onOrderEvent } from "./realtime/socketServer.js";
 import { prisma } from "./lib/prisma.js";
+import { whatsappService } from "./services/WhatsappService.js";
 
 dotenv.config();
 
@@ -29,6 +30,8 @@ async function runMigrations() {
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "isPickup" BOOLEAN NOT NULL DEFAULT false`,
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "assignedMotoboyId" TEXT`,
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "deliveryCode" TEXT`,
+    // Celular do pedido de entrega, para os avisos de WhatsApp
+    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "contactPhone" TEXT`,
     `ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS "notes" TEXT`,
     `ALTER TABLE "ProductSize" ADD COLUMN IF NOT EXISTS "label" TEXT`,
     // Adicional do açaí (do 5º ao 8º complemento) cobrado dentro do mesmo item.
@@ -70,6 +73,9 @@ async function runMigrations() {
 }
 
 runMigrations().then(() => {
+  // Avisos de WhatsApp do delivery (só envia se estiver ligado no admin)
+  onOrderEvent((type, payload) => whatsappService.onOrderEvent(type, payload));
+  whatsappService.iniciar();
   server.listen(port, () => {
     console.log(`API Dubob rodando na porta ${port}`);
   });

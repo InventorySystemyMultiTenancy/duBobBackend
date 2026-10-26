@@ -152,6 +152,7 @@ model Order {
   isPickup       Boolean      @default(false)
   assignedMotoboyId String?
   deliveryCode   String?
+  contactPhone   String?  // celular para os avisos de WhatsApp do delivery
   notes          String?
   terminalIntentId String?
   createdAt      DateTime     @default(now())

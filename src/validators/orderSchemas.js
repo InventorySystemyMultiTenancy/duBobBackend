@@ -36,6 +36,12 @@ export const createOrderSchema = z.object({
   deliveryFee: z.number().nonnegative().optional(),
   deliveryLat: z.number().optional(),
   deliveryLon: z.number().optional(),
+  // Celular do cliente para avisos de WhatsApp (só entrega)
+  contactPhone: z
+    .string()
+    .trim()
+    .regex(/^[\d\s()+-]{10,20}$/, "Celular inválido.")
+    .optional(),
   items: z.array(itemSchema).min(1).max(30),
 });
 

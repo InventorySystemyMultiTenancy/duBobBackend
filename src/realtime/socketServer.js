@@ -78,12 +78,30 @@ export function emitOrderCreated(payload) {
   emitToUserAndStaff("order:created", payload);
 }
 
+// Outros interessados nas mudanças de pedido (ex.: avisos de WhatsApp).
+// Todo status e pagamento passa por aqui, venha de onde vier.
+const orderEventListeners = [];
+
+export function onOrderEvent(listener) {
+  orderEventListeners.push(listener);
+}
+
+function notifyOrderEvent(type, payload) {
+  for (const listener of orderEventListeners) {
+    Promise.resolve()
+      .then(() => listener(type, payload))
+      .catch((error) => console.error("[orderEvent]", error.message));
+  }
+}
+
 export function emitOrderStatusUpdated(payload) {
   emitToUserAndStaff("order:status-updated", payload);
+  notifyOrderEvent("status", payload);
 }
 
 export function emitPaymentUpdated(payload) {
   emitToUserAndStaff("order:payment-updated", payload);
+  notifyOrderEvent("pagamento", payload);
 }
 
 export function emitChamarGarcom(payload) {

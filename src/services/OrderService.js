@@ -100,6 +100,7 @@ export class OrderService {
     deliveryLat,
     deliveryLon,
     isPickup,
+    contactPhone,
   }) {
     if (!userId && !mesaId && !comandaId) {
       throw new AppError(
@@ -156,6 +157,7 @@ export class OrderService {
             : {}),
           ...(deliveryLat != null ? { deliveryLat } : {}),
           ...(deliveryLon != null ? { deliveryLon } : {}),
+          ...(contactPhone ? { contactPhone } : {}),
           items: {
             create: normalizedItems.map((item) => ({
               quantity: item.quantity,
@@ -735,11 +737,19 @@ export class OrderService {
   async adminSetPaymentStatus(orderId, paymentStatus, paymentMethod) {
     const order = await this.orderRepository.findById(orderId);
     if (!order) throw new AppError("Pedido não encontrado.", 404);
-    return this.orderRepository.updatePaymentStatus(
+    const updated = await this.orderRepository.updatePaymentStatus(
       orderId,
       paymentStatus,
       paymentMethod,
     );
+    // Pago ou liberado para a cozinha pelo caixa: cozinha e avisos ficam sabendo
+    emitPaymentUpdated({
+      orderId,
+      userId: order.userId,
+      paymentStatus,
+      paymentMethod,
+    });
+    return updated;
   }
 
   /**
