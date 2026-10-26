@@ -33,6 +33,7 @@ const KEYS = {
   apiKey: "whatsapp_api_key",
   intervalo: "whatsapp_intervalo_segundos",
   etapas: "whatsapp_etapas",
+  textos: "whatsapp_textos",
   webhookToken: "whatsapp_webhook_token",
 };
 
@@ -71,26 +72,51 @@ export function montarMensagemPromo(modelo, nome) {
   return texto.trim() + RODAPE;
 }
 
-export function montarMensagem(etapa, pedido) {
-  const codigo = `#${String(pedido.id).slice(-6).toUpperCase()}`;
-  const nome = primeiroNome(pedido.userName);
-  const oi = nome ? `Oi, ${nome}!` : "Oi!";
-  let texto;
-  if (etapa === ETAPAS.CONFIRMADO) {
-    texto = `${oi} 💜 Recebemos seu pedido ${codigo} no Dubob e ele já está sendo preparado.`;
-  } else if (etapa === ETAPAS.SAIU) {
-    texto =
-      `${oi} 🛵 Seu pedido ${codigo} saiu para entrega` +
-      (pedido.motoboyName ? ` com ${primeiroNome(pedido.motoboyName)}` : "") +
-      "." +
-      (pedido.deliveryCode
-        ? `\n\nCódigo de entrega: *${pedido.deliveryCode}*\nInforme ao motoboy quando receber.`
-        : "");
-  } else if (etapa === ETAPAS.ENTREGUE) {
-    texto = `Pedido ${codigo} entregue! Obrigado por pedir no Dubob 💜`;
-  } else {
-    texto = `${oi} Seu pedido ${codigo} foi cancelado. Se tiver alguma dúvida, fale com a gente.`;
+// Textos padrão dos avisos; o admin pode editar cada um.
+// Variáveis: {nome}, {pedido}, {motoboy}, {codigo}
+export const TEXTOS_PADRAO = {
+  CONFIRMADO: "Oi, {nome}! 💜 Recebemos seu pedido {pedido} no Dubob e ele já está sendo preparado.",
+  SAIU:
+    "Oi, {nome}! 🛵 Seu pedido {pedido} saiu para entrega com {motoboy}.\n\n" +
+    "Código de entrega: *{codigo}* — informe ao motoboy quando receber.",
+  ENTREGUE: "Pedido {pedido} entregue! Obrigado por pedir no Dubob 💜",
+  CANCELADO:
+    "Oi, {nome}! Seu pedido {pedido} foi cancelado. Se tiver alguma dúvida, fale com a gente.",
+};
+const TEXTO_MAX = 1000;
+
+// Troca as variáveis; quando falta o dado, tira o trecho sem deixar buraco
+// ("Oi, {nome}!" vira "Oi!", "com {motoboy}" some, linha do {codigo} some).
+export function preencherTexto(modelo, valores) {
+  let texto = String(modelo);
+  for (const [chave, valor] of Object.entries(valores)) {
+    const marca = new RegExp(`\\{${chave}\\}`, "gi");
+    if (valor) {
+      texto = texto.replace(marca, valor);
+    } else if (chave === "codigo") {
+      // sem "g": o test() com "g" guarda posição entre chamadas
+      const naLinha = new RegExp(`\\{${chave}\\}`, "i");
+      texto = texto
+        .split("\n")
+        .filter((linha) => !naLinha.test(linha))
+        .join("\n");
+    } else {
+      texto = texto
+        .replace(new RegExp(`\\s+com\\s+\\{${chave}\\}`, "gi"), "")
+        .replace(new RegExp(`[,\\s]*\\{${chave}\\}`, "gi"), "");
+    }
   }
+  return texto.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export function montarMensagem(etapa, pedido, textos = TEXTOS_PADRAO) {
+  const modelo = textos?.[etapa] || TEXTOS_PADRAO[etapa] || TEXTOS_PADRAO.CANCELADO;
+  const texto = preencherTexto(modelo, {
+    nome: primeiroNome(pedido.userName),
+    pedido: `#${String(pedido.id).slice(-6).toUpperCase()}`,
+    motoboy: primeiroNome(pedido.motoboyName),
+    codigo: pedido.deliveryCode ? String(pedido.deliveryCode) : "",
+  });
   return texto + RODAPE;
 }
 
@@ -134,14 +160,22 @@ export class WhatsappService {
   }
 
   async lerConfig() {
-    const [ativo, url, instancia, apiKeyEnc, intervalo, etapas] = await Promise.all([
-      this.#get(KEYS.ativo),
-      this.#get(KEYS.url),
-      this.#get(KEYS.instancia),
-      this.#get(KEYS.apiKey),
-      this.#get(KEYS.intervalo),
-      this.#get(KEYS.etapas),
-    ]);
+    const [ativo, url, instancia, apiKeyEnc, intervalo, etapas, textosSalvos] =
+      await Promise.all([
+        this.#get(KEYS.ativo),
+        this.#get(KEYS.url),
+        this.#get(KEYS.instancia),
+        this.#get(KEYS.apiKey),
+        this.#get(KEYS.intervalo),
+        this.#get(KEYS.etapas),
+        this.#get(KEYS.textos),
+      ]);
+    let textos = { ...TEXTOS_PADRAO };
+    try {
+      if (textosSalvos) textos = { ...textos, ...JSON.parse(textosSalvos) };
+    } catch {
+      textos = { ...TEXTOS_PADRAO };
+    }
     let apiKey = null;
     if (apiKeyEnc) {
       try {
@@ -163,6 +197,7 @@ export class WhatsappService {
       apiKey,
       intervaloSegundos: Number(intervalo) || INTERVALO_PADRAO,
       etapas: etapasLista,
+      textos,
     };
   }
 
@@ -176,6 +211,8 @@ export class WhatsappService {
       apiKeyConfigurada: Boolean(config.apiKey),
       intervaloSegundos: config.intervaloSegundos,
       etapas: config.etapas,
+      textos: config.textos,
+      textosPadrao: TEXTOS_PADRAO,
     };
   }
 
@@ -217,6 +254,22 @@ export class WhatsappService {
       }
       novo.etapas = [...new Set(payload.etapas)];
     }
+    if (payload.textos !== undefined) {
+      if (!payload.textos || typeof payload.textos !== "object") {
+        throw new AppError("Textos inválidos.", 422);
+      }
+      const textos = { ...atual.textos };
+      for (const etapa of Object.values(ETAPAS)) {
+        if (payload.textos[etapa] === undefined) continue;
+        const texto = String(payload.textos[etapa] ?? "").trim();
+        if (texto.length > TEXTO_MAX) {
+          throw new AppError(`Cada mensagem pode ter no máximo ${TEXTO_MAX} caracteres.`, 422);
+        }
+        // Vazio volta para o texto padrão
+        textos[etapa] = texto || TEXTOS_PADRAO[etapa];
+      }
+      novo.textos = textos;
+    }
     if (payload.ativo !== undefined) novo.ativo = Boolean(payload.ativo);
 
     if (novo.ativo && (!novo.evolutionUrl || !novo.apiKey || !novo.instancia)) {
@@ -229,6 +282,7 @@ export class WhatsappService {
       this.settings.set(KEYS.instancia, novo.instancia ?? ""),
       this.settings.set(KEYS.intervalo, String(novo.intervaloSegundos)),
       this.settings.set(KEYS.etapas, JSON.stringify(novo.etapas)),
+      this.settings.set(KEYS.textos, JSON.stringify(novo.textos)),
       ...(novo.apiKey !== atual.apiKey
         ? [this.settings.set(KEYS.apiKey, encryptSecret(novo.apiKey))]
         : []),
@@ -431,7 +485,7 @@ export class WhatsappService {
         orderId: pedido.id,
         etapa,
         telefone,
-        texto: montarMensagem(etapa, pedido),
+        texto: montarMensagem(etapa, pedido, config.textos),
       });
       if (novo) this.agendar(1000);
       return novo ? etapa : null;

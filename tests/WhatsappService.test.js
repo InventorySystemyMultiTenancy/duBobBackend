@@ -322,3 +322,43 @@ describe("Promoções no WhatsApp", () => {
     expect(repo.closeFinishedCampaigns).toHaveBeenCalled();
   });
 });
+
+const { preencherTexto, TEXTOS_PADRAO } = await import("../src/services/WhatsappService.js");
+
+describe("Textos editáveis dos avisos", () => {
+  it("troca as variáveis e tira o trecho quando falta o dado", () => {
+    const modelo = "Oi, {nome}! Pedido {pedido} saiu com {motoboy}.\nCódigo: {codigo}";
+    expect(preencherTexto(modelo, { nome: "Maria", pedido: "#AB12CD", motoboy: "João", codigo: "4821" })).toBe(
+      "Oi, Maria! Pedido #AB12CD saiu com João.\nCódigo: 4821",
+    );
+    expect(preencherTexto(modelo, { nome: "", pedido: "#AB12CD", motoboy: "", codigo: "" })).toBe(
+      "Oi! Pedido #AB12CD saiu.",
+    );
+  });
+
+  it("o aviso usa o texto editado pelo admin", async () => {
+    const repo = fakeRepo();
+    const settings = fakeSettings({
+      whatsapp_textos: JSON.stringify({ SAIU: "{nome}, tá chegando! Código {codigo}" }),
+    });
+    const service = new WhatsappService(settings, repo, vi.fn());
+    await service.onOrderEvent("status", { orderId: "x", status: "SAIU_PARA_ENTREGA" });
+    clearTimeout(service.timer);
+    const { texto } = repo.enqueue.mock.calls[0][0];
+    expect(texto).toMatch(/^Maria, tá chegando! Código 4821/);
+    expect(texto).toContain("responda SAIR");
+  });
+
+  it("salva os textos; vazio volta ao padrão e texto gigante é recusado", async () => {
+    const settings = fakeSettings();
+    const service = new WhatsappService(settings, fakeRepo(), vi.fn());
+    const config = await service.updateConfig({
+      textos: { CONFIRMADO: "Recebemos, {nome}!", ENTREGUE: "   " },
+    });
+    clearTimeout(service.timer);
+    expect(config.textos.CONFIRMADO).toBe("Recebemos, {nome}!");
+    expect(config.textos.ENTREGUE).toBe(TEXTOS_PADRAO.ENTREGUE);
+    await expect(service.updateConfig({ textos: { SAIU: "x".repeat(1001) } })).rejects.toThrow(/1000/);
+    clearTimeout(service.timer);
+  });
+});
