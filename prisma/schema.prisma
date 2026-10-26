@@ -155,6 +155,10 @@ model Order {
   contactPhone   String?  // celular para os avisos de WhatsApp do delivery
   notes          String?
   terminalIntentId String?
+  externalSource String?  // "IFOOD" para pedidos importados
+  externalId     String?  // id do pedido no iFood
+  externalDisplayId String? // número curto que o iFood mostra ao cliente
+  externalPayload Json?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   deliveredAt    DateTime?
@@ -164,6 +168,8 @@ model Order {
   comanda        Comanda?     @relation(fields: [comandaId], references: [id], onDelete: Restrict)
   items          OrderItem[]
   payment        Payment?
+
+  @@unique([externalSource, externalId])
 }
 
 model OrderItem {

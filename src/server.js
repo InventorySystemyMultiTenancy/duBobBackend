@@ -4,6 +4,7 @@ import { app } from "./app.js";
 import { initializeSocketServer, onOrderEvent } from "./realtime/socketServer.js";
 import { prisma } from "./lib/prisma.js";
 import { whatsappService } from "./services/WhatsappService.js";
+import { ifoodService } from "./services/IfoodService.js";
 
 dotenv.config();
 
@@ -51,6 +52,20 @@ async function runMigrations() {
       FROM "Product" p
       WHERE p."id" IN ('db_mscomp_leite_ninho', 'db_mscomp_ovomaltine', 'db_mscomp_pacoquinha', 'db_mscomp_leite_condensado')
       ON CONFLICT ("productId", "size") DO NOTHING`,
+    // Pedidos que vêm de fora (iFood): origem, id lá fora e dados da entrega
+    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalSource" TEXT`,
+    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalId" TEXT`,
+    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalDisplayId" TEXT`,
+    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalPayload" JSONB`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Order_externalSource_externalId_key" ON "Order"("externalSource", "externalId")`,
+    // Dono dos pedidos do iFood (sem e-mail/telefone: não faz login) e o item
+    // usado quando o produto do iFood não tem par no cardápio
+    `INSERT INTO "User" ("id", "name", "passwordHash", "role", "createdAt", "updatedAt")
+      VALUES ('db_user_ifood', 'iFood', '!', 'CLIENTE', NOW(), NOW())
+      ON CONFLICT ("id") DO NOTHING`,
+    `INSERT INTO "Product" ("id", "name", "category", "isActive", "createdAt", "updatedAt")
+      VALUES ('db_ifood_item', 'Item iFood', 'ifood', false, NOW(), NOW())
+      ON CONFLICT ("id") DO NOTHING`,
     `DO $$
       BEGIN
         IF NOT EXISTS (
@@ -76,6 +91,9 @@ runMigrations().then(() => {
   // Avisos de WhatsApp do delivery (só envia se estiver ligado no admin)
   onOrderEvent((type, payload) => whatsappService.onOrderEvent(type, payload));
   whatsappService.iniciar();
+  // Pedidos do iFood (só consulta se estiver ligado no admin)
+  onOrderEvent((type, payload) => ifoodService.onOrderEvent(type, payload));
+  ifoodService.iniciar();
   server.listen(port, () => {
     console.log(`API Dubob rodando na porta ${port}`);
   });

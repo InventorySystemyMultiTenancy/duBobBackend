@@ -345,7 +345,8 @@ export class OrderRepository {
              o."deliveryAddress", o.notes, o."paymentMethod",
              o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
              o."isPickup", o."assignedMotoboyId", o."deliveryCode",
-             o."terminalIntentId", o."createdAt", o."updatedAt", o."deliveredAt"
+             o."terminalIntentId", o."externalSource", o."externalDisplayId", o."externalPayload",
+             o."createdAt", o."updatedAt", o."deliveredAt"
       FROM "Order" o WHERE o.id = ${orderId}
     `;
     if (!rows.length) return null;
@@ -606,7 +607,7 @@ export class OrderRepository {
 
   async confirmDelivery(orderId, code) {
     const rows = await prisma.$queryRaw`
-      SELECT "deliveryCode", status::text AS status, "isPickup"
+      SELECT "deliveryCode", status::text AS status, "isPickup", "externalSource"
       FROM "Order" WHERE id = ${orderId}
     `;
     if (!rows.length) return null;
@@ -617,7 +618,7 @@ export class OrderRepository {
     if (order.isPickup) {
       throw new Error("IS_PICKUP");
     }
-    if (order.deliveryCode !== code) {
+    if (order.externalSource !== "IFOOD" && order.deliveryCode !== code) {
       throw new Error("CODE_INVALID");
     }
     return this.updateStatus(orderId, "ENTREGUE", new Date());
@@ -705,6 +706,7 @@ export class OrderRepository {
           o."deliveryAddress", o.notes, o."paymentMethod",
           o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
           o."isPickup", o."assignedMotoboyId", o."deliveryCode",
+          o."externalSource", o."externalDisplayId", o."externalPayload",
           o."createdAt", o."updatedAt", o."deliveredAt"
         FROM "Order" o
         WHERE o.status::text NOT IN ('ENTREGUE','CANCELADO')

@@ -27,6 +27,7 @@ import { PaymentSettingsService } from "./services/PaymentSettingsService.js";
 import { SumUpPaymentService } from "./services/SumUpPaymentService.js";
 import { StonePaymentService } from "./services/StonePaymentService.js";
 import { whatsappService } from "./services/WhatsappService.js";
+import { ifoodService } from "./services/IfoodService.js";
 import { PromotionService } from "./services/PromotionService.js";
 
 // ── Variáveis de ambiente críticas ───────────────────────────────────────────
@@ -767,6 +768,53 @@ app.post("/api/whatsapp/webhook/:token", async (req, res) => {
   }
   return res.status(200).json({ ok: true });
 });
+
+// Integração iFood: credenciais do app e status da consulta de pedidos
+app.get(
+  "/api/admin/ifood",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute(() => ifoodService.getStatus()),
+);
+
+app.put(
+  "/api/admin/ifood",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute((req) => ifoodService.updateConfig(req.body ?? {})),
+);
+
+app.post(
+  "/api/admin/ifood/testar",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute(() => ifoodService.testarConexao()),
+);
+
+// Ações da cozinha num pedido do iFood (cancelar com motivo, responder ao
+// pedido de cancelamento do cliente)
+const IFOOD_ORDER_ROLES = ["ADMIN", "FUNCIONARIO", "ATENDENTE", "COZINHA_DELIVERY"];
+
+app.get(
+  "/api/ifood/orders/:orderId/motivos-cancelamento",
+  authenticateToken,
+  authorizeRoles(...IFOOD_ORDER_ROLES),
+  jsonRoute((req) => ifoodService.motivosCancelamento(req.params.orderId)),
+);
+
+app.post(
+  "/api/ifood/orders/:orderId/cancelar",
+  authenticateToken,
+  authorizeRoles(...IFOOD_ORDER_ROLES),
+  jsonRoute((req) => ifoodService.cancelar(req.params.orderId, req.body ?? {})),
+);
+
+app.post(
+  "/api/ifood/orders/:orderId/disputa",
+  authenticateToken,
+  authorizeRoles(...IFOOD_ORDER_ROLES),
+  jsonRoute((req) => ifoodService.responderDisputa(req.params.orderId, req.body ?? {})),
+);
 
 // Configuração de pagamento: qual banco cobra nas maquininhas
 app.get(

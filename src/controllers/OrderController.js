@@ -400,12 +400,14 @@ export class OrderController {
 
   async confirmDelivery(req, res, next) {
     try {
+      // Pedido do iFood não tem código (o cliente não recebeu o nosso):
+      // pode vir vazio, e o repositório só dispensa o código nesse caso.
       const { code } = req.body;
-      if (!code || typeof code !== "string") {
+      if (code != null && typeof code !== "string") {
         throw new AppError("Código é obrigatório.", 422);
       }
-      const normalizedCode = code.trim();
-      if (!/^\d{4}$/.test(normalizedCode)) {
+      const normalizedCode = String(code ?? "").trim();
+      if (normalizedCode && !/^\d{4}$/.test(normalizedCode)) {
         throw new AppError("Código deve ter 4 números.", 422);
       }
 

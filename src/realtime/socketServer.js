@@ -99,6 +99,13 @@ export function emitOrderStatusUpdated(payload) {
   notifyOrderEvent("status", payload);
 }
 
+// Mudança no pedido que não é status nem pagamento (ex.: cliente do iFood
+// pediu cancelamento): só a equipe precisa recarregar.
+export function emitOrderUpdated(payload) {
+  if (!ioInstance) return;
+  ioInstance.to("staff").emit("order:updated", payload);
+}
+
 export function emitPaymentUpdated(payload) {
   emitToUserAndStaff("order:payment-updated", payload);
   notifyOrderEvent("pagamento", payload);
