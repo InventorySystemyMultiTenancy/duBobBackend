@@ -48,6 +48,13 @@ function fakeRepo(pedido = pedidoDelivery) {
     markFailed: vi.fn(async () => {}),
     markDiscarded: vi.fn(async () => {}),
     optOut: vi.fn(async () => {}),
+    nextCampaignMessage: vi.fn(async () => null),
+    reserveCampaignMessage: vi.fn(async () => true),
+    finishCampaignMessage: vi.fn(async () => {}),
+    closeFinishedCampaigns: vi.fn(async () => {}),
+    promoAudience: vi.fn(async () => []),
+    optOutList: vi.fn(async () => new Set()),
+    createCampaign: vi.fn(async () => "camp-1"),
   };
 }
 
@@ -221,5 +228,97 @@ describe("WhatsApp do delivery: SAIR", () => {
     });
     expect(r).toEqual({ ignorado: true });
     expect(repo.optOut).not.toHaveBeenCalled();
+  });
+});
+
+const { montarMensagemPromo } = await import("../src/services/WhatsappService.js");
+
+describe("Promoções no WhatsApp", () => {
+  const audiencia = [
+    { id: "u1", name: "Maria Souza", telefone: "(11) 98765-4321" },
+    { id: "u2", name: "Maria Outra Conta", telefone: "11987654321" }, // mesmo número
+    { id: "u3", name: "Pedro", telefone: null },
+    { id: "u4", name: "Ana", telefone: "21999998888" }, // respondeu SAIR
+    { id: "u5", name: "", telefone: "31988887777" },
+  ];
+
+  it("troca {nome} pelo primeiro nome e sempre põe o SAIR", () => {
+    expect(montarMensagemPromo("Oi {nome}, milk shake em dobro!", "Maria Souza")).toMatch(
+      /^Oi Maria, milk shake em dobro!/,
+    );
+    expect(montarMensagemPromo("Oi, {nome}! Promo hoje", "")).toMatch(/^Oi! Promo hoje/);
+    expect(montarMensagemPromo("Promo", "Ana")).toContain("responda SAIR");
+  });
+
+  it("prévia conta só quem pode receber e calcula o tempo", async () => {
+    const repo = fakeRepo();
+    repo.promoAudience.mockResolvedValue(audiencia);
+    repo.optOutList.mockResolvedValue(new Set(["5521999998888"]));
+    const service = new WhatsappService(fakeSettings(), repo, vi.fn());
+    const preview = await service.previewCampanha({ intervaloSegundos: 20 });
+    expect(preview).toMatchObject({
+      aceitaram: 5,
+      semTelefone: 1,
+      sairam: 1,
+      destinatarios: 2,
+      intervaloSegundos: 20,
+      tempoEstimadoSegundos: 40,
+    });
+  });
+
+  it("intervalo mínimo de 3 segundos", async () => {
+    const service = new WhatsappService(fakeSettings(), fakeRepo(), vi.fn());
+    await expect(service.previewCampanha({ intervaloSegundos: 2 })).rejects.toThrow(/entre 3 e 600/);
+    await expect(service.previewCampanha({ intervaloSegundos: 3 })).resolves.toMatchObject({
+      intervaloSegundos: 3,
+    });
+  });
+
+  it("cria a campanha com uma das versões da mensagem para cada pessoa", async () => {
+    const repo = fakeRepo();
+    repo.promoAudience.mockResolvedValue(audiencia);
+    const service = new WhatsappService(fakeSettings(), repo, vi.fn());
+    const r = await service.criarCampanha({
+      titulo: "Dobro de sábado",
+      mensagens: ["Oi {nome}, versão A", "{nome}, versão B", ""],
+      intervaloSegundos: 10,
+    });
+    clearTimeout(service.timer);
+    expect(r).toEqual({ id: "camp-1", destinatarios: 3 });
+    const { destinatarios, mensagens, intervaloSegundos } = repo.createCampaign.mock.calls[0][0];
+    expect(mensagens).toEqual(["Oi {nome}, versão A", "{nome}, versão B"]);
+    expect(intervaloSegundos).toBe(10);
+    expect(destinatarios[0].texto).toMatch(/Maria/);
+    expect(destinatarios.every((d) => /versão (A|B)/.test(d.texto))).toBe(true);
+  });
+
+  it("avisos de entrega saem antes da campanha", async () => {
+    const repo = fakeRepo();
+    repo.nextInQueue.mockResolvedValue({ id: "m1", orderId: "o1", telefone: "5511987654321", texto: "saiu", tentativas: 0, createdAt: new Date() });
+    repo.nextCampaignMessage.mockResolvedValue({ id: "c1", campaignId: "camp-1", telefone: "5511911112222", texto: "promo", intervaloSegundos: 3 });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { instance: { state: "open" } }))
+      .mockResolvedValueOnce(jsonResponse(201, {}));
+    const service = new WhatsappService(fakeSettings(), repo, fetchImpl);
+    await service.processarFila();
+    clearTimeout(service.timer);
+    expect(repo.markSent).toHaveBeenCalledWith("m1");
+    expect(repo.reserveCampaignMessage).not.toHaveBeenCalled();
+  });
+
+  it("campanha sai mesmo com os avisos de entrega desligados", async () => {
+    const repo = fakeRepo();
+    repo.nextCampaignMessage.mockResolvedValue({ id: "c1", campaignId: "camp-1", telefone: "5511911112222", texto: "promo", intervaloSegundos: 3 });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { instance: { state: "open" } }))
+      .mockResolvedValueOnce(jsonResponse(201, {}));
+    const service = new WhatsappService(fakeSettings({ whatsapp_ativo: "false" }), repo, fetchImpl);
+    await service.processarFila();
+    clearTimeout(service.timer);
+    expect(repo.nextInQueue).not.toHaveBeenCalled();
+    expect(repo.finishCampaignMessage).toHaveBeenCalledWith("c1");
+    expect(repo.closeFinishedCampaigns).toHaveBeenCalled();
   });
 });

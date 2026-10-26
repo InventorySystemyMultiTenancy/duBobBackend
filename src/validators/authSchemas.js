@@ -12,6 +12,8 @@ export const registerSchema = z.object({
   cpf: z.string().min(11).max(14).optional().nullable(),
   address: z.string().max(255).optional().nullable(),
   password: z.string().min(6).max(100),
+  // Caixinha "Quero receber promoções no WhatsApp"
+  whatsappPromo: z.boolean().optional(),
   role: z
     .enum([
       "ADMIN",

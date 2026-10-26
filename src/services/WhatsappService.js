@@ -45,6 +45,32 @@ export function normalizarTelefone(telefone) {
 
 const primeiroNome = (nome) => String(nome || "").trim().split(/\s+/)[0] || "";
 
+// Campanhas: intervalo mínimo pedido pela loja; o padrão é bem maior
+export const CAMPANHA_INTERVALO_MINIMO = 3;
+export const CAMPANHA_INTERVALO_PADRAO = 20;
+
+function validarIntervaloCampanha(valor) {
+  const segundos = valor == null || valor === "" ? CAMPANHA_INTERVALO_PADRAO : Number(valor);
+  if (!Number.isInteger(segundos) || segundos < CAMPANHA_INTERVALO_MINIMO || segundos > 600) {
+    throw new AppError(
+      `O intervalo deve ficar entre ${CAMPANHA_INTERVALO_MINIMO} e 600 segundos.`,
+      422,
+    );
+  }
+  return segundos;
+}
+
+const sortear = (lista) => lista[Math.floor(Math.random() * lista.length)];
+
+// Troca {nome} pelo primeiro nome; sem nome, tira o ", {nome}" junto
+export function montarMensagemPromo(modelo, nome) {
+  const primeiro = primeiroNome(nome);
+  const texto = primeiro
+    ? modelo.replace(/\{nome\}/gi, primeiro)
+    : modelo.replace(/[,\s]*\{nome\}/gi, "");
+  return texto.trim() + RODAPE;
+}
+
 export function montarMensagem(etapa, pedido) {
   const codigo = `#${String(pedido.id).slice(-6).toUpperCase()}`;
   const nome = primeiroNome(pedido.userName);
@@ -427,7 +453,8 @@ export class WhatsappService {
     return { config, conexao, fila: { ...fila, pausa: this.pausa } };
   }
 
-  // Um aviso por vez; se o número estiver desconectado, espera 1 minuto
+  // Um envio por vez. Avisos de entrega têm prioridade sobre campanhas de
+  // promoção. Se o número estiver desconectado, espera 1 minuto.
   async processarFila() {
     if (this.processando) return;
     this.processando = true;
@@ -435,17 +462,22 @@ export class WhatsappService {
     let proximaEm = null;
     try {
       const config = await this.lerConfig();
-      if (!config.ativo) {
+      if (!config.evolutionUrl || !config.apiKey || !config.instancia) {
         this.pausa = null;
         return;
       }
-      const mensagem = await this.repo.nextInQueue();
-      if (!mensagem) {
+      const aviso = config.ativo ? await this.repo.nextInQueue() : null;
+      const promo = aviso ? null : await this.repo.nextCampaignMessage();
+      if (!aviso && !promo) {
         this.pausa = null;
+        await this.repo.closeFinishedCampaigns();
         return;
       }
-      if (Date.now() - new Date(mensagem.createdAt).getTime() > VALIDADE_MINUTOS * 60 * 1000) {
-        await this.repo.markDiscarded(mensagem.id, "Aviso antigo demais (não enviado atrasado).");
+      if (
+        aviso &&
+        Date.now() - new Date(aviso.createdAt).getTime() > VALIDADE_MINUTOS * 60 * 1000
+      ) {
+        await this.repo.markDiscarded(aviso.id, "Aviso antigo demais (não enviado atrasado).");
         proximaEm = 500;
         return;
       }
@@ -466,22 +498,40 @@ export class WhatsappService {
       }
       this.pausa = null;
 
-      if (!(await this.repo.reserve(mensagem.id))) {
-        proximaEm = 500;
-        return;
+      let intervalo;
+      if (aviso) {
+        if (!(await this.repo.reserve(aviso.id))) {
+          proximaEm = 500;
+          return;
+        }
+        try {
+          await this.#enviarTexto(config, aviso.telefone, aviso.texto);
+          await this.repo.markSent(aviso.id);
+        } catch (error) {
+          const tentativas = Number(aviso.tentativas) + 1;
+          await this.repo.markFailed(aviso.id, error.message, {
+            retry: !error.semWhatsapp && tentativas < MAX_TENTATIVAS,
+          });
+          console.error(`[whatsapp] pedido ${aviso.orderId}:`, error.message);
+        }
+        intervalo = Math.max(INTERVALO_MINIMO, config.intervaloSegundos);
+      } else {
+        if (!(await this.repo.reserveCampaignMessage(promo.id))) {
+          proximaEm = 500;
+          return;
+        }
+        try {
+          await this.#enviarTexto(config, promo.telefone, promo.texto);
+          await this.repo.finishCampaignMessage(promo.id);
+        } catch (error) {
+          await this.repo.finishCampaignMessage(promo.id, error.message);
+          console.error(`[whatsapp] campanha ${promo.campaignId}:`, error.message);
+        }
+        await this.repo.closeFinishedCampaigns();
+        intervalo = Math.max(CAMPANHA_INTERVALO_MINIMO, Number(promo.intervaloSegundos));
       }
-      try {
-        await this.#enviarTexto(config, mensagem.telefone, mensagem.texto);
-        await this.repo.markSent(mensagem.id);
-      } catch (error) {
-        const tentativas = Number(mensagem.tentativas) + 1;
-        await this.repo.markFailed(mensagem.id, error.message, {
-          retry: !error.semWhatsapp && tentativas < MAX_TENTATIVAS,
-        });
-        console.error(`[whatsapp] pedido ${mensagem.orderId}:`, error.message);
-      }
-      const base = Math.max(INTERVALO_MINIMO, config.intervaloSegundos) * 1000;
-      proximaEm = Math.round(base * (0.7 + Math.random() * 0.6));
+      // Pausa variada (±30%) para não parecer disparo automático
+      proximaEm = Math.round(intervalo * 1000 * (0.7 + Math.random() * 0.6));
     } catch (error) {
       console.error("[whatsapp] fila:", error.message);
       proximaEm = 60 * 1000;
@@ -489,6 +539,97 @@ export class WhatsappService {
       this.processando = false;
       if (proximaEm !== null) this.agendar(proximaEm);
     }
+  }
+
+  // ---- Promoções no WhatsApp (só para quem aceitou) ----
+
+  setPromoOptIn(userId, aceita) {
+    return this.repo.setPromoOptIn(userId, aceita);
+  }
+
+  getPromoOptIn(userId) {
+    return this.repo.getPromoOptIn(userId);
+  }
+
+  // Quem vai receber: aceitou, tem celular válido e não respondeu SAIR.
+  // Um envio por número (dois cadastros com o mesmo celular recebem uma vez).
+  async #destinatariosPromo() {
+    const [audiencia, sairam] = await Promise.all([
+      this.repo.promoAudience(),
+      this.repo.optOutList(),
+    ]);
+    const porTelefone = new Map();
+    let semTelefone = 0;
+    let saiu = 0;
+    for (const pessoa of audiencia) {
+      const telefone = normalizarTelefone(pessoa.telefone);
+      if (!telefone) {
+        semTelefone += 1;
+      } else if (sairam.has(telefone)) {
+        saiu += 1;
+      } else if (!porTelefone.has(telefone)) {
+        porTelefone.set(telefone, { telefone, nome: pessoa.name });
+      }
+    }
+    return {
+      aceitaram: audiencia.length,
+      semTelefone,
+      sairam: saiu,
+      lista: [...porTelefone.values()],
+    };
+  }
+
+  async previewCampanha({ intervaloSegundos } = {}) {
+    const intervalo = validarIntervaloCampanha(intervaloSegundos);
+    const { aceitaram, semTelefone, sairam, lista } = await this.#destinatariosPromo();
+    return {
+      aceitaram,
+      semTelefone,
+      sairam,
+      destinatarios: lista.length,
+      intervaloSegundos: intervalo,
+      tempoEstimadoSegundos: lista.length * intervalo,
+    };
+  }
+
+  async criarCampanha({ titulo, mensagens, intervaloSegundos } = {}, user = null) {
+    const intervalo = validarIntervaloCampanha(intervaloSegundos);
+    const textos = (Array.isArray(mensagens) ? mensagens : [])
+      .map((m) => String(m ?? "").trim())
+      .filter(Boolean);
+    if (!textos.length) throw new AppError("Escreva pelo menos uma mensagem.", 422);
+    if (textos.length > 5) throw new AppError("Use no máximo 5 versões da mensagem.", 422);
+    if (textos.some((t) => t.length > 1000)) {
+      throw new AppError("Cada mensagem pode ter no máximo 1000 caracteres.", 422);
+    }
+    const config = await this.lerConfig();
+    if (!config.evolutionUrl || !config.apiKey || !config.instancia) {
+      throw new AppError("Configure e conecte o WhatsApp antes de enviar promoções.", 422);
+    }
+    const { lista } = await this.#destinatariosPromo();
+    if (!lista.length) throw new AppError("Ninguém aceitou receber promoções ainda.", 422);
+
+    const id = await this.repo.createCampaign({
+      titulo: String(titulo || "Promoção").trim().slice(0, 80) || "Promoção",
+      mensagens: textos,
+      intervaloSegundos: intervalo,
+      criadoPor: user?.email ?? user?.id ?? null,
+      destinatarios: lista.map((pessoa) => ({
+        ...pessoa,
+        texto: montarMensagemPromo(sortear(textos), pessoa.nome),
+      })),
+    });
+    this.agendar(1000);
+    return { id, destinatarios: lista.length };
+  }
+
+  listarCampanhas() {
+    return this.repo.listCampaigns();
+  }
+
+  async cancelarCampanha(id) {
+    await this.repo.cancelCampaign(id);
+    return { cancelada: true };
   }
 
   agendar(ms) {

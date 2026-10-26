@@ -36,6 +36,41 @@ function ensureTables() {
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    // Quem aceitou receber promoções no WhatsApp (cadastro ou checkout)
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "whatsappPromo" BOOLEAN NOT NULL DEFAULT false`,
+    );
+    // Campanhas de promoção: cada destinatário vira uma mensagem na fila
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "WhatsappCampaign" (
+        "id" TEXT PRIMARY KEY,
+        "titulo" TEXT NOT NULL,
+        "mensagens" TEXT NOT NULL,
+        "intervaloSegundos" INTEGER NOT NULL,
+        "status" TEXT NOT NULL DEFAULT 'ENVIANDO',
+        "total" INTEGER NOT NULL DEFAULT 0,
+        "criadoPor" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "WhatsappCampaignMessage" (
+        "id" TEXT PRIMARY KEY,
+        "campaignId" TEXT NOT NULL,
+        "telefone" TEXT NOT NULL,
+        "nome" TEXT,
+        "texto" TEXT NOT NULL,
+        "status" TEXT NOT NULL DEFAULT 'FILA',
+        "erro" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "enviadoEm" TIMESTAMP(3)
+      )
+    `);
+    // Um envio por número em cada campanha
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "WhatsappCampaignMessage_campaign_telefone_key"
+      ON "WhatsappCampaignMessage" ("campaignId", "telefone")
+    `);
   })().catch((error) => {
     tablesReady = null;
     throw error;
@@ -108,6 +143,9 @@ export class WhatsappRepository {
     await prisma.$executeRawUnsafe(
       `UPDATE "WhatsappMessage" SET "status" = 'FILA' WHERE "status" = 'ENVIANDO'`,
     );
+    await prisma.$executeRawUnsafe(
+      `UPDATE "WhatsappCampaignMessage" SET "status" = 'FILA' WHERE "status" = 'ENVIANDO'`,
+    );
   }
 
   async queueSummary() {
@@ -141,6 +179,134 @@ export class WhatsappRepository {
     await prisma.$executeRaw`
       INSERT INTO "WhatsappOptOut" ("telefone") VALUES (${telefone})
       ON CONFLICT ("telefone") DO NOTHING
+    `;
+  }
+
+  async optOutList() {
+    await ensureTables();
+    const rows = await prisma.$queryRaw`SELECT "telefone" FROM "WhatsappOptOut"`;
+    return new Set(rows.map((row) => row.telefone));
+  }
+
+  async setPromoOptIn(userId, aceita) {
+    await ensureTables();
+    await prisma.$executeRaw`
+      UPDATE "User" SET "whatsappPromo" = ${Boolean(aceita)} WHERE "id" = ${userId}
+    `;
+  }
+
+  async getPromoOptIn(userId) {
+    await ensureTables();
+    const rows = await prisma.$queryRaw`
+      SELECT "whatsappPromo" FROM "User" WHERE "id" = ${userId}
+    `;
+    return Boolean(rows[0]?.whatsappPromo);
+  }
+
+  // Clientes que aceitaram promoções, com o celular do cadastro ou o último
+  // celular informado num pedido de entrega
+  async promoAudience() {
+    await ensureTables();
+    return prisma.$queryRaw`
+      SELECT u.id, u.name,
+             COALESCE(NULLIF(u.phone, ''), (
+               SELECT o."contactPhone" FROM "Order" o
+               WHERE o."userId" = u.id AND o."contactPhone" IS NOT NULL
+               ORDER BY o."createdAt" DESC LIMIT 1
+             )) AS telefone
+      FROM "User" u
+      WHERE u."whatsappPromo" = true AND u.role::text = 'CLIENTE'
+    `;
+  }
+
+  async createCampaign({ titulo, mensagens, intervaloSegundos, criadoPor, destinatarios }) {
+    await ensureTables();
+    const id = crypto.randomUUID();
+    await prisma.$executeRaw`
+      INSERT INTO "WhatsappCampaign" ("id", "titulo", "mensagens", "intervaloSegundos", "total", "criadoPor")
+      VALUES (${id}, ${titulo}, ${JSON.stringify(mensagens)}, ${intervaloSegundos},
+              ${destinatarios.length}, ${criadoPor ?? null})
+    `;
+    for (const d of destinatarios) {
+      await prisma.$executeRaw`
+        INSERT INTO "WhatsappCampaignMessage" ("id", "campaignId", "telefone", "nome", "texto")
+        VALUES (${crypto.randomUUID()}, ${id}, ${d.telefone}, ${d.nome ?? null}, ${d.texto})
+        ON CONFLICT ("campaignId", "telefone") DO NOTHING
+      `;
+    }
+    return id;
+  }
+
+  async listCampaigns() {
+    await ensureTables();
+    return prisma.$queryRaw`
+      SELECT c."id", c."titulo", c."intervaloSegundos", c."status", c."total", c."createdAt",
+             COUNT(m.*) FILTER (WHERE m."status" = 'ENVIADO')::int AS "enviadas",
+             COUNT(m.*) FILTER (WHERE m."status" = 'ERRO')::int AS "erros",
+             COUNT(m.*) FILTER (WHERE m."status" = 'FILA')::int AS "naFila"
+      FROM "WhatsappCampaign" c
+      LEFT JOIN "WhatsappCampaignMessage" m ON m."campaignId" = c."id"
+      GROUP BY c."id"
+      ORDER BY c."createdAt" DESC
+      LIMIT 20
+    `;
+  }
+
+  async nextCampaignMessage() {
+    await ensureTables();
+    const rows = await prisma.$queryRaw`
+      SELECT m.*, c."intervaloSegundos"
+      FROM "WhatsappCampaignMessage" m
+      JOIN "WhatsappCampaign" c ON c."id" = m."campaignId"
+      WHERE m."status" = 'FILA' AND c."status" = 'ENVIANDO'
+      ORDER BY c."createdAt" ASC, m."createdAt" ASC
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+
+  async reserveCampaignMessage(id) {
+    const count = await prisma.$executeRaw`
+      UPDATE "WhatsappCampaignMessage" SET "status" = 'ENVIANDO'
+      WHERE "id" = ${id} AND "status" = 'FILA'
+    `;
+    return count > 0;
+  }
+
+  async finishCampaignMessage(id, erro = null) {
+    if (erro) {
+      await prisma.$executeRaw`
+        UPDATE "WhatsappCampaignMessage" SET "status" = 'ERRO', "erro" = ${String(erro).slice(0, 500)}
+        WHERE "id" = ${id}
+      `;
+    } else {
+      await prisma.$executeRaw`
+        UPDATE "WhatsappCampaignMessage" SET "status" = 'ENVIADO', "enviadoEm" = NOW()
+        WHERE "id" = ${id}
+      `;
+    }
+  }
+
+  // Campanha sem mais nada na fila vira concluída
+  async closeFinishedCampaigns() {
+    await prisma.$executeRawUnsafe(`
+      UPDATE "WhatsappCampaign" c SET "status" = 'CONCLUIDA'
+      WHERE c."status" = 'ENVIANDO' AND NOT EXISTS (
+        SELECT 1 FROM "WhatsappCampaignMessage" m
+        WHERE m."campaignId" = c."id" AND m."status" IN ('FILA', 'ENVIANDO')
+      )
+    `);
+  }
+
+  async cancelCampaign(id) {
+    await ensureTables();
+    await prisma.$executeRaw`
+      UPDATE "WhatsappCampaignMessage" SET "status" = 'CANCELADA'
+      WHERE "campaignId" = ${id} AND "status" = 'FILA'
+    `;
+    await prisma.$executeRaw`
+      UPDATE "WhatsappCampaign" SET "status" = 'CANCELADA'
+      WHERE "id" = ${id} AND "status" = 'ENVIANDO'
     `;
   }
 

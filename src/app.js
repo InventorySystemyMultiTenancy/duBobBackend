@@ -27,6 +27,7 @@ import { PaymentSettingsService } from "./services/PaymentSettingsService.js";
 import { SumUpPaymentService } from "./services/SumUpPaymentService.js";
 import { StonePaymentService } from "./services/StonePaymentService.js";
 import { whatsappService } from "./services/WhatsappService.js";
+import { PromotionService } from "./services/PromotionService.js";
 
 // ── Variáveis de ambiente críticas ───────────────────────────────────────────
 const REQUIRED_ENV = ["JWT_SECRET", "DATABASE_URL"];
@@ -626,8 +627,8 @@ app.put(
   },
 );
 
-// Avisos de WhatsApp do delivery (Evolution API)
-const whatsappRoute = (handler) => async (req, res, next) => {
+// Rota simples: responde { data } ou passa o erro adiante
+const jsonRoute = (handler) => async (req, res, next) => {
   try {
     return res.status(200).json({ data: await handler(req) });
   } catch (err) {
@@ -635,25 +636,64 @@ const whatsappRoute = (handler) => async (req, res, next) => {
   }
 };
 
+// Promoções: preço especial por tempo limitado (o pedido já cobra o preço
+// promocional; o cardápio usa a lista pública para mostrar)
+const promotionService = new PromotionService();
+
+app.get(
+  "/api/promotions/active",
+  jsonRoute(() => promotionService.listActive()),
+);
+
+app.get(
+  "/api/admin/promotions",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute(() => promotionService.list()),
+);
+
+app.post(
+  "/api/admin/promotions",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute((req) => promotionService.create(req.body ?? {})),
+);
+
+app.put(
+  "/api/admin/promotions/:id",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute((req) => promotionService.update(req.params.id, req.body ?? {})),
+);
+
+app.delete(
+  "/api/admin/promotions/:id",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute((req) => promotionService.remove(req.params.id)),
+);
+
+// Avisos de WhatsApp do delivery (Evolution API)
+
 app.get(
   "/api/admin/whatsapp",
   authenticateToken,
   authorizeRoles("ADMIN"),
-  whatsappRoute(() => whatsappService.getStatus()),
+  jsonRoute(() => whatsappService.getStatus()),
 );
 
 app.put(
   "/api/admin/whatsapp",
   authenticateToken,
   authorizeRoles("ADMIN"),
-  whatsappRoute((req) => whatsappService.updateConfig(req.body ?? {})),
+  jsonRoute((req) => whatsappService.updateConfig(req.body ?? {})),
 );
 
 app.post(
   "/api/admin/whatsapp/conectar",
   authenticateToken,
   authorizeRoles("ADMIN"),
-  whatsappRoute((req) =>
+  jsonRoute((req) =>
     whatsappService.conectar({
       webhookBaseUrl:
         process.env.PUBLIC_API_URL || `${req.protocol}://${req.get("host")}`,
@@ -665,7 +705,54 @@ app.post(
   "/api/admin/whatsapp/teste",
   authenticateToken,
   authorizeRoles("ADMIN"),
-  whatsappRoute((req) => whatsappService.enviarTeste(req.body?.telefone)),
+  jsonRoute((req) => whatsappService.enviarTeste(req.body?.telefone)),
+);
+
+// Promoções no WhatsApp: só para quem aceitou e não respondeu SAIR
+app.get(
+  "/api/admin/whatsapp/campanhas",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute(() => whatsappService.listarCampanhas()),
+);
+
+app.get(
+  "/api/admin/whatsapp/campanhas/preview",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute((req) =>
+    whatsappService.previewCampanha({ intervaloSegundos: req.query.intervalo }),
+  ),
+);
+
+app.post(
+  "/api/admin/whatsapp/campanhas",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute((req) => whatsappService.criarCampanha(req.body ?? {}, req.user)),
+);
+
+app.post(
+  "/api/admin/whatsapp/campanhas/:id/cancelar",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  jsonRoute((req) => whatsappService.cancelarCampanha(req.params.id)),
+);
+
+// Cliente logado escolhe se quer receber promoções no WhatsApp
+app.get(
+  "/api/me/whatsapp-promo",
+  authenticateToken,
+  jsonRoute(async (req) => ({ aceita: await whatsappService.getPromoOptIn(req.user.id) })),
+);
+
+app.put(
+  "/api/me/whatsapp-promo",
+  authenticateToken,
+  jsonRoute(async (req) => {
+    await whatsappService.setPromoOptIn(req.user.id, req.body?.aceita === true);
+    return { aceita: req.body?.aceita === true };
+  }),
 );
 
 // Respostas dos clientes (Evolution chama aqui); o token secreto fica na URL

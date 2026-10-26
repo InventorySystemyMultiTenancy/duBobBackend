@@ -3,6 +3,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { AppError } from "../errors/AppError.js";
 import { UserRepository } from "../repositories/UserRepository.js";
+import { whatsappService } from "./WhatsappService.js";
 
 const STAFF_ROLES = new Set([
   "ADMIN",
@@ -47,7 +48,7 @@ export class AuthService {
   }
 
   async register(
-    { name, email, phone, cpf, address, password, role },
+    { name, email, phone, cpf, address, password, role, whatsappPromo },
     authUser = null,
   ) {
     const normalizedCpf = cpf ? String(cpf).replace(/\D/g, "") : null;
@@ -91,6 +92,12 @@ export class AuthService {
       passwordHash,
       role: requestedRole,
     });
+
+    if (whatsappPromo && requestedRole === "CLIENTE") {
+      await whatsappService
+        .setPromoOptIn(user.id, true)
+        .catch((error) => console.error("[register] aceite de promoções:", error.message));
+    }
 
     if (requestedRole === "CLIENTE") {
       return this.#buildClientSession(user);

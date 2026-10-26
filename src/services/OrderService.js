@@ -2,6 +2,10 @@ import { MercadoPagoConfig, Payment as MPPayment } from "mercadopago";
 import { Prisma } from "@prisma/client";
 import { AppError } from "../errors/AppError.js";
 import { prisma } from "../lib/prisma.js";
+import {
+  PromotionRepository,
+  findPromoPrice,
+} from "../repositories/PromotionRepository.js";
 import { OrderRepository } from "../repositories/OrderRepository.js";
 import { PaymentRepository } from "../repositories/PaymentRepository.js";
 import { ExpenseService } from "./ExpenseService.js";
@@ -112,6 +116,12 @@ export class OrderService {
     if (!items?.length) {
       throw new AppError("Pedido deve conter ao menos 1 item.", 422);
     }
+
+    // A tabela de promoções precisa existir antes da transação: um erro de
+    // consulta lá dentro derrubaria o pedido inteiro.
+    await new PromotionRepository().ensureTable().catch((error) => {
+      console.warn("[createOrder] promoções indisponíveis:", error.message);
+    });
 
     const order = await prisma.$transaction(
       async (tx) => {
@@ -1483,10 +1493,14 @@ export class OrderService {
       throw new AppError("Produto inválido ou inativo.", 422);
     }
 
-    const basePrice = product.sizes?.[0]?.price;
-    if (basePrice == null) {
+    const tablePrice = product.sizes?.[0]?.price;
+    if (tablePrice == null) {
       throw new AppError("Produto sem preço configurado.", 422);
     }
+    // Promoção valendo agora: preço especial (só se for menor)
+    const promoPrice = await findPromoPrice(tx, product.id, product.sizes[0].size);
+    const basePrice =
+      promoPrice != null && promoPrice < Number(tablePrice) ? promoPrice : tablePrice;
 
     const addonIds = [...new Set(item.addonIds ?? [])];
     let addons = [];
@@ -1528,11 +1542,17 @@ export class OrderService {
           name: addon.name,
           price: Number(addon.price),
         })),
-        ...paidComplements.map((row) => ({
-          id: row.id,
-          name: row.name,
-          price: Number(row.sizes[0].price),
-        })),
+        ...(await Promise.all(
+          paidComplements.map(async (row) => {
+            const promo = await findPromoPrice(tx, row.id, row.sizes[0].size);
+            const price = Number(row.sizes[0].price);
+            return {
+              id: row.id,
+              name: row.name,
+              price: promo != null && promo < price ? promo : price,
+            };
+          }),
+        )),
       ];
 
       addonsCents = addons.reduce((sum, addon) => sum + toCents(addon.price), 0);
