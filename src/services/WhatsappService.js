@@ -166,7 +166,7 @@ export class WhatsappService {
     };
   }
 
-  // Para a tela do admin: a chave nunca volta inteira
+  // Para a tela do admin: a chave nunca volta, nem em parte
   async getConfig() {
     const config = await this.lerConfig();
     return {
@@ -174,9 +174,6 @@ export class WhatsappService {
       evolutionUrl: config.evolutionUrl,
       instancia: config.instancia,
       apiKeyConfigurada: Boolean(config.apiKey),
-      apiKeyMascarada: config.apiKey
-        ? `${config.apiKey.slice(0, 4)}••••${config.apiKey.slice(-4)}`
-        : null,
       intervaloSegundos: config.intervaloSegundos,
       etapas: config.etapas,
     };

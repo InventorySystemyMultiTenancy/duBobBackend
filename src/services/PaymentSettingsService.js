@@ -32,9 +32,6 @@ const PROVIDER_KEYS = {
 const SUMUP_API_KEY = "sumup_api_key";
 const SUMUP_MERCHANT_KEY = "sumup_merchant_code";
 
-const maskSecret = (value) =>
-  value ? `${value.slice(0, 6)}…${value.slice(-4)}` : "";
-
 // Só letras e números, fácil de digitar na maquininha.
 const generatePassword = (length = 14) => {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -136,8 +133,8 @@ export class PaymentSettingsService {
       terminalProvider,
       onlineProvider,
       stone: {
+        // Nenhum pedaço da chave sai do servidor: só se está configurada
         configured: Boolean(stone.secretKey),
-        secretKeyMasked: maskSecret(stone.secretKey),
         source: stone.source,
         serviceRefererName: stone.serviceRefererName,
         paymentType: stone.paymentType,
@@ -145,7 +142,6 @@ export class PaymentSettingsService {
       mercadoPago: { configured: Boolean(process.env.MP_ACCESS_TOKEN) },
       sumup: {
         configured: Boolean(sumup.apiKey),
-        apiKeyMasked: maskSecret(sumup.apiKey),
         merchantCode: sumup.merchantCode,
         source: sumup.source,
       },
