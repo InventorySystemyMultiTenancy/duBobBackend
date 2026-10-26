@@ -427,6 +427,14 @@ app.post(
   (req, res, next) => orderController.create(req, res, next),
 );
 
+// Caixa lança o pedido do cliente no balcão e já recebe o pagamento
+app.post(
+  "/api/orders/balcao",
+  authenticateToken,
+  authorizeRoles("ADMIN", "FUNCIONARIO", "ATENDENTE"),
+  (req, res, next) => orderController.createCounterOrder(req, res, next),
+);
+
 app.get(
   "/api/orders/me",
   authenticateToken,

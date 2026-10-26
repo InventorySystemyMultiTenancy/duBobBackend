@@ -39,6 +39,15 @@ export const createOrderSchema = z.object({
   items: z.array(itemSchema).min(1).max(30),
 });
 
+// Pedido feito pelo caixa para o cliente no balcão: já sai pago.
+export const COUNTER_PAYMENT_METHODS = ["DINHEIRO", "CREDITO", "DEBITO", "PIX"];
+
+export const createCounterOrderSchema = z.object({
+  customerName: z.string().trim().min(1, "Informe o nome do cliente.").max(80),
+  paymentMethod: z.enum(COUNTER_PAYMENT_METHODS),
+  items: z.array(itemSchema).min(1).max(30),
+});
+
 export const deliveryFreightSchema = z.object({
   cep: z.string().regex(/^\d{5}-?\d{3}$/, "CEP inválido"),
   numero: z.string().min(1).max(20),

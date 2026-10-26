@@ -929,9 +929,11 @@ export class OrderService {
 
       const filtered = orders.filter((o) => {
         if (o.status === "CANCELADO") return false;
+        // Totem e balcão (caixa) são pedidos da loja: vão para a cozinha normal
         const isTotemOrder =
           o.paymentMethod === "MAQUININHA_TOTEM" ||
-          String(o.notes || "").includes("Pedido feito no Totem");
+          String(o.notes || "").includes("Pedido feito no Totem") ||
+          String(o.notes || "").includes("Pedido no Caixa");
         if (user?.role === "COZINHA_DELIVERY") {
           return !o.mesaId && !o.comandaId && !isTotemOrder;
         }
@@ -1327,6 +1329,22 @@ export class OrderService {
         throw new AppError("Pedido de retirada não usa código.", 400);
       throw err;
     }
+  }
+
+  // Pedido do balcão: retirada no local, nome do cliente nas notas e pago na
+  // hora (entra direto na cozinha). Quem lança fica como dono do pedido.
+  async createCounterOrder({ staff, customerName, paymentMethod, items }) {
+    const order = await this.createOrder({
+      userId: staff.id,
+      deliveryAddress: "Balcão - retirada no local",
+      isPickup: true,
+      notes: `Pedido no Caixa | Cliente: ${customerName}`,
+      paymentMethod,
+      deliveryFee: 0,
+      items,
+    });
+    const paid = await this.markPaidByMotoboy(order.id, staff, paymentMethod);
+    return { ...order, ...paid, paymentStatus: "APROVADO", paymentMethod };
   }
 
   async markPaidByMotoboy(orderId, user, paymentMethod) {

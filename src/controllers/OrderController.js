@@ -4,6 +4,7 @@ import { AppError } from "../errors/AppError.js";
 import { OrderService } from "../services/OrderService.js";
 import { STORE_LAT, STORE_LON } from "../services/DeliveryService.js";
 import {
+  createCounterOrderSchema,
   createOrderSchema,
   paymentWebhookSchema,
   updateOrderStatusSchema,
@@ -12,6 +13,26 @@ import {
 const orderService = new OrderService();
 
 export class OrderController {
+  async createCounterOrder(req, res, next) {
+    try {
+      const payload = createCounterOrderSchema.parse(req.body);
+      const order = await orderService.createCounterOrder({
+        staff: req.user,
+        ...payload,
+      });
+      return res.status(201).json({
+        message: "Pedido do balcão criado e pago.",
+        data: order,
+      });
+    } catch (error) {
+      return this.#handleError(error, next, {
+        route: "POST /api/orders/balcao",
+        userId: req.user?.id,
+        role: req.user?.role,
+      });
+    }
+  }
+
   async create(req, res, next) {
     try {
       const payload = createOrderSchema.parse(req.body);
