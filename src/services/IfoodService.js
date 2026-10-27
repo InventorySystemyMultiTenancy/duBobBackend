@@ -398,17 +398,18 @@ export class IfoodService {
     if (!event.orderId) return;
 
     if (code === "PLC" || fullCode === "PLACED") {
-      const order = await this.importarPedido(client, event.orderId);
-      if (order && config.autoConfirmar) {
-        await client.confirm(event.orderId).catch((error) => {
-          console.error("[ifood] confirmar:", error.message);
-        });
-      }
+      await this.importarPedido(client, event.orderId);
+      if (config.autoConfirmar) await this.#confirmar(client, event.orderId);
       return;
     }
 
     const local = await this.#findLocalOrder(event.orderId);
     if (!local) return;
+
+    if (code === "CFM" || fullCode === "CONFIRMED") {
+      if (!local.externalPayload?.confirmado) await this.#updateMeta(local, { confirmado: true });
+      return;
+    }
 
     if (code === "CAN" || fullCode === "CANCELLED") {
       await this.#setStatus(local, "CANCELADO");
@@ -457,6 +458,24 @@ export class IfoodService {
       LIMIT 1
     `;
     return rows[0] ?? null;
+  }
+
+  // Confirma uma vez só. Falha temporária (rede, 5xx, 429) lança erro para o
+  // evento PLC ficar sem ack e a confirmação ser tentada de novo na próxima
+  // consulta; recusa definitiva (4xx, ex.: pedido já cancelado) só registra.
+  async #confirmar(client, externalId) {
+    const local = await this.#findLocalOrder(externalId);
+    if (!local || local.externalPayload?.confirmado) return;
+    try {
+      await client.confirm(externalId);
+    } catch (error) {
+      const definitivo = error.status >= 400 && error.status < 500 && error.status !== 429;
+      if (!definitivo) throw error;
+      console.error("[ifood] confirmar:", error.message);
+      this.lastError = error.message;
+      return;
+    }
+    await this.#updateMeta(local, { confirmado: true });
   }
 
   async #findLocalById(orderId) {
@@ -667,7 +686,7 @@ export class IfoodService {
       const id = local.externalId;
 
       if (payload.status === "PREPARANDO") {
-        if (!config.autoConfirmar) await client.confirm(id).catch(() => {});
+        if (!meta.confirmado) await this.#confirmar(client, id).catch(() => {});
         await client.startPreparation(id);
       } else if (payload.status === "PRONTO") {
         await client.readyToPickup(id);
