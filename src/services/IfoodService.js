@@ -225,6 +225,18 @@ export class IfoodService {
     this.lastPollAt = null;
     this.lastError = null;
     this.lastOrderAt = null;
+    // Últimos eventos recebidos, para a tela do admin (só em memória)
+    this.recentEvents = [];
+  }
+
+  #registrarEvento(event, resultado) {
+    this.recentEvents.unshift({
+      em: new Date().toISOString(),
+      codigo: event.fullCode || event.code || "?",
+      pedido: String(event.orderId ?? "").slice(0, 8),
+      resultado,
+    });
+    this.recentEvents.length = Math.min(this.recentEvents.length, 20);
   }
 
   async #get(key) {
@@ -285,6 +297,7 @@ export class IfoodService {
         ultimaConsulta: this.lastPollAt,
         ultimoPedido: this.lastOrderAt,
         ultimoErro: this.lastError,
+        eventos: this.recentEvents,
       },
     };
   }
@@ -369,15 +382,18 @@ export class IfoodService {
       this.lastPollAt = new Date().toISOString();
       this.lastError = null;
 
+      if (events.length) console.log(`[ifood] ${events.length} evento(s) recebido(s)`);
       const handled = [];
       for (const event of events) {
         try {
           await this.#handleEvent(client, config, event);
           handled.push(event.id);
+          this.#registrarEvento(event, "ok");
         } catch (error) {
           // Sem ack o evento volta na próxima consulta
           console.error(`[ifood] evento ${event.code} do pedido ${event.orderId}:`, error.message);
           this.lastError = error.message;
+          this.#registrarEvento(event, `erro: ${error.message}`);
         }
       }
       await client.acknowledge(handled);
