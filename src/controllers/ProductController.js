@@ -1,12 +1,14 @@
 import { ZodError } from "zod";
 import { AppError } from "../errors/AppError.js";
 import { ProductService } from "../services/ProductService.js";
+import { ImageUploadService } from "../services/ImageUploadService.js";
 import {
   createProductSchema,
   updateProductSchema,
 } from "../validators/productSchemas.js";
 
 const productService = new ProductService();
+const imageUploadService = new ImageUploadService();
 
 function summarizeProductPayload(body = {}) {
   return {
@@ -125,6 +127,15 @@ export class ProductController {
         body: summarizeProductPayload(req.body),
       });
       return this.#handleError(error, next, "ProductController.update");
+    }
+  }
+
+  async imageUploadSignature(_req, res, next) {
+    try {
+      const data = imageUploadService.createProductUploadSignature();
+      return res.status(200).json({ data });
+    } catch (error) {
+      return this.#handleError(error, next, "ProductController.imageUpload");
     }
   }
 

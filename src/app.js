@@ -214,6 +214,12 @@ app.get("/api/products/:productId", (req, res, next) =>
 );
 
 // Admin product management routes
+app.post(
+  "/api/admin/products/image-upload-signature",
+  authenticateToken,
+  authorizeRoles("ADMIN"),
+  (req, res, next) => productController.imageUploadSignature(req, res, next),
+);
 app.get(
   "/api/admin/products",
   authenticateToken,
