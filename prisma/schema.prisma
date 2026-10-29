@@ -153,6 +153,7 @@ model Order {
   assignedMotoboyId String?
   deliveryCode   String?
   contactPhone   String?  // celular para os avisos de WhatsApp do delivery
+  number         Int?     // número de exibição do pedido, de 1 a 1000 (volta ao 1)
   notes          String?
   terminalIntentId String?
   externalSource String?  // "IFOOD" para pedidos importados

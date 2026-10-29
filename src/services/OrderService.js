@@ -79,6 +79,48 @@ function isPaidComplementCategory(category) {
   return PAID_COMPLEMENT_CATEGORIES.some((needle) => normalized.includes(needle));
 }
 
+// Número de exibição do pedido: 1 a 1000, volta ao 1. O id do pedido continua
+// único; o número é só para cozinha, cliente, TV e WhatsApp.
+const ORDER_NUMBER_MAX = 1000;
+let orderNumberReady = null;
+
+function ensureOrderNumberReady() {
+  orderNumberReady ??= (async () => {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "number" INTEGER`,
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE SEQUENCE IF NOT EXISTS "OrderNumber_seq" MINVALUE 1 MAXVALUE ${ORDER_NUMBER_MAX} CYCLE`,
+    );
+    return true;
+  })().catch((error) => {
+    orderNumberReady = null;
+    console.warn("[createOrder] número do pedido indisponível:", error.message);
+    return false;
+  });
+  return orderNumberReady;
+}
+
+// Próximo número da sequência (atômica: dois pedidos ao mesmo tempo nunca
+// pegam o mesmo). Pula número que ainda está num pedido em aberto.
+export async function nextOrderNumber(client) {
+  if (typeof client?.$queryRaw !== "function") return null;
+  let numero = null;
+  for (let tentativa = 0; tentativa < ORDER_NUMBER_MAX; tentativa += 1) {
+    const [row] = await client.$queryRaw`SELECT nextval('"OrderNumber_seq"')::int AS n`;
+    numero = row?.n ?? null;
+    if (numero == null) return null;
+    const emUso = await client.$queryRaw`
+      SELECT 1 FROM "Order"
+      WHERE "number" = ${numero}
+        AND status::text NOT IN ('ENTREGUE', 'CANCELADO')
+      LIMIT 1
+    `;
+    if (!emUso.length) return numero;
+  }
+  return numero;
+}
+
 export class OrderService {
   constructor(
     orderRepository = new OrderRepository(),
@@ -122,6 +164,7 @@ export class OrderService {
     await new PromotionRepository().ensureTable().catch((error) => {
       console.warn("[createOrder] promoções indisponíveis:", error.message);
     });
+    const numberReady = await ensureOrderNumberReady();
 
     const order = await prisma.$transaction(
       async (tx) => {
@@ -146,7 +189,10 @@ export class OrderService {
           },
         };
 
+        const number = numberReady ? await nextOrderNumber(tx) : null;
+
         const orderCreateData = {
+          ...(number != null ? { number } : {}),
           ...(userId ? { userId } : {}),
           ...(mesaId ? { mesaId } : {}),
           ...(comandaId ? { comandaId } : {}),
@@ -269,6 +315,7 @@ export class OrderService {
 
     emitOrderCreated({
       orderId: order.id,
+      number: order.number ?? null,
       userId: order.userId,
       mesaId: order.mesaId,
       comandaId: order.comandaId,

@@ -362,3 +362,10 @@ describe("Textos editáveis dos avisos", () => {
     clearTimeout(service.timer);
   });
 });
+
+describe("Número do pedido nos avisos", () => {
+  it("usa o número de 1 a 1000 quando o pedido tem", () => {
+    expect(montarMensagem("ENTREGUE", { ...pedidoDelivery, number: 42 })).toMatch(/^Pedido #42 entregue!/);
+    expect(montarMensagem("ENTREGUE", pedidoDelivery)).toMatch(/^Pedido #AB12CD entregue!/);
+  });
+});

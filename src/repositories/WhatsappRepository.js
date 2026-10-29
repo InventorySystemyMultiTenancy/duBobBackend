@@ -158,9 +158,11 @@ export class WhatsappRepository {
       FROM "WhatsappMessage"
     `;
     const recentes = await prisma.$queryRaw`
-      SELECT "id", "orderId", "etapa", "telefone", "status", "erro", "createdAt", "enviadoEm"
-      FROM "WhatsappMessage"
-      ORDER BY "createdAt" DESC
+      SELECT m."id", m."orderId", o."number" AS "orderNumber", m."etapa", m."telefone",
+             m."status", m."erro", m."createdAt", m."enviadoEm"
+      FROM "WhatsappMessage" m
+      LEFT JOIN "Order" o ON o.id = m."orderId"
+      ORDER BY m."createdAt" DESC
       LIMIT 20
     `;
     return { ...counts, recentes };
@@ -315,7 +317,7 @@ export class WhatsappRepository {
     const rows = await prisma.$queryRaw`
       SELECT o.id, o.status::text AS status, o."paymentStatus"::text AS "paymentStatus",
              o."paymentMethod", o."isPickup", o."mesaId", o."comandaId",
-             o."deliveryCode", o."contactPhone",
+             o."deliveryCode", o."contactPhone", o."number",
              u.name AS "userName", u.phone AS "userPhone",
              m.name AS "motoboyName"
       FROM "Order" o

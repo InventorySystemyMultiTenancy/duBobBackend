@@ -33,6 +33,9 @@ async function runMigrations() {
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "deliveryCode" TEXT`,
     // Celular do pedido de entrega, para os avisos de WhatsApp
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "contactPhone" TEXT`,
+    // Número de exibição do pedido: 1 a 1000 e volta ao 1 (o id continua único)
+    `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "number" INTEGER`,
+    `CREATE SEQUENCE IF NOT EXISTS "OrderNumber_seq" MINVALUE 1 MAXVALUE 1000 CYCLE`,
     `ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS "notes" TEXT`,
     `ALTER TABLE "ProductSize" ADD COLUMN IF NOT EXISTS "label" TEXT`,
     // Adicional do açaí (do 5º ao 8º complemento) cobrado dentro do mesmo item.

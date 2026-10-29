@@ -71,6 +71,7 @@ export class OrderRepository {
         "assigned_motoboy_id",
       ]),
       deliveryCode: this._pick(raw, ["deliveryCode", "delivery_code"]),
+      number: this._pick(raw, ["number"]),
       deliveredAt: this._pick(raw, ["deliveredAt", "delivered_at"]),
     };
   }
@@ -344,7 +345,7 @@ export class OrderRepository {
              o."paymentStatus"::text AS "paymentStatus",
              o."deliveryAddress", o.notes, o."paymentMethod",
              o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
-             o."isPickup", o."assignedMotoboyId", o."deliveryCode",
+             o."isPickup", o."number", o."assignedMotoboyId", o."deliveryCode",
              o."terminalIntentId", o."externalSource", o."externalDisplayId", o."externalPayload",
              o."createdAt", o."updatedAt", o."deliveredAt"
       FROM "Order" o WHERE o.id = ${orderId}
@@ -509,7 +510,7 @@ export class OrderRepository {
           o."paymentStatus"::text AS "paymentStatus",
           o."deliveryAddress", o.notes, o."paymentMethod",
           o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
-          o."isPickup", o."assignedMotoboyId", o."deliveryCode",
+          o."isPickup", o."number", o."assignedMotoboyId", o."deliveryCode",
           o."createdAt", o."updatedAt", o."deliveredAt"
         FROM "Order" o
         WHERE o."userId" = ${userId}
@@ -705,7 +706,7 @@ export class OrderRepository {
           o."paymentStatus"::text AS "paymentStatus",
           o."deliveryAddress", o.notes, o."paymentMethod",
           o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
-          o."isPickup", o."assignedMotoboyId", o."deliveryCode",
+          o."isPickup", o."number", o."assignedMotoboyId", o."deliveryCode",
           o."externalSource", o."externalDisplayId", o."externalPayload",
           o."createdAt", o."updatedAt", o."deliveredAt"
         FROM "Order" o
@@ -855,7 +856,7 @@ export class OrderRepository {
         o."paymentStatus"::text AS "paymentStatus",
         o."deliveryAddress", o.notes, o."paymentMethod",
         o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
-        o."isPickup", o."assignedMotoboyId",
+        o."isPickup", o."number", o."assignedMotoboyId",
         o."createdAt", o."updatedAt", o."deliveredAt"
       FROM "Order" o
       WHERE o.status::text <> 'CANCELADO'
@@ -946,7 +947,7 @@ export class OrderRepository {
               o."paymentStatus"::text AS "paymentStatus",
               o."deliveryAddress", o.notes, o."paymentMethod",
               o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
-              o."isPickup", o."assignedMotoboyId", o."deliveryCode",
+              o."isPickup", o."number", o."assignedMotoboyId", o."deliveryCode",
               o."terminalIntentId",
               o."createdAt", o."updatedAt", o."deliveredAt",
               u.name AS "userName",

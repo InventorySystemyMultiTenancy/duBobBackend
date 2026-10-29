@@ -113,7 +113,10 @@ export function montarMensagem(etapa, pedido, textos = TEXTOS_PADRAO) {
   const modelo = textos?.[etapa] || TEXTOS_PADRAO[etapa] || TEXTOS_PADRAO.CANCELADO;
   const texto = preencherTexto(modelo, {
     nome: primeiroNome(pedido.userName),
-    pedido: `#${String(pedido.id).slice(-6).toUpperCase()}`,
+    // Número de 1 a 1000; pedido antigo (sem número) usa o fim do id
+    pedido: pedido.number
+      ? `#${pedido.number}`
+      : `#${String(pedido.id).slice(-6).toUpperCase()}`,
     motoboy: primeiroNome(pedido.motoboyName),
     codigo: pedido.deliveryCode ? String(pedido.deliveryCode) : "",
   });
