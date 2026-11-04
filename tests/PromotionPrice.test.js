@@ -24,6 +24,7 @@ import { PromotionService } from "../src/services/PromotionService.js";
 
 const pedido = () => ({
   userId: "u1",
+  isPickup: true,
   items: [{ productId: "db_milkshake_tradicional", size: "MEDIA", quantity: 2 }],
 });
 

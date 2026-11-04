@@ -2,12 +2,27 @@ import axios from "axios";
 import { AppError } from "../errors/AppError.js";
 
 // Constantes da loja
-// Endereço fixo: Avenida Cachoeira Paulista, 17 — CEP 03551-000, São Paulo
-export const STORE_LAT = -23.5318;
-export const STORE_LON = -46.5043;
+// Endereço fixo: Avenida XV de Novembro, 29 — Centro, Cornélio Procópio - PR
+// (coordenadas do Google Geocoding, precisão ROOFTOP)
+export const STORE_LAT = -23.1786486;
+export const STORE_LON = -50.6473325;
 
-const TAXA_BASE = 5.0; // R$ 5,00 fixo (saída do motoboy)
-const TAXA_POR_KM = 2.0; // R$ 2,00 por km rodado
+// Área de entrega: município de Cornélio Procópio
+const AREA_ENTREGA = { sul: -23.375, oeste: -50.8137, norte: -23.014, leste: -50.4648 };
+const dentroDaArea = (lat, lon) =>
+  lat >= AREA_ENTREGA.sul &&
+  lat <= AREA_ENTREGA.norte &&
+  lon >= AREA_ENTREGA.oeste &&
+  lon <= AREA_ENTREGA.leste;
+
+// Google Geocoding (mesma chave do Clube Kids); sem chave ou se o Google
+// recusar, usa o OpenStreetMap/Nominatim.
+const chaveGoogle = () =>
+  process.env.GOOGLE_GEOCODING_API_KEY || process.env.GOOGLE_GEOLOCATION_API_KEY;
+let googleRecusado = false; // chave sem a Geocoding API: usa só o OSM até reiniciar
+
+const FRETE_FIXO = 8.0; // R$ 8,00 para qualquer entrega dentro do raio
+const RAIO_MAXIMO_KM = 8; // acima disso (distância de rota) não entregamos
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const formatBRL = (valor) =>
@@ -48,6 +63,87 @@ function haversineKm(lat1, lon1, lat2, lon2) {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * Geocodifica pelo Google. Retorna undefined quando o Google não pode ser usado
+ * (sem chave / chave recusada) para cair no OpenStreetMap, e null quando não acha.
+ */
+async function geocodificarGoogle(texto) {
+  const chave = chaveGoogle();
+  if (!chave || googleRecusado) return undefined;
+
+  const res = await axiosWithRetry({
+    method: "get",
+    url: "https://maps.googleapis.com/maps/api/geocode/json",
+    params: {
+      address: texto,
+      region: "br",
+      language: "pt-BR",
+      components: "country:BR",
+      bounds: `${AREA_ENTREGA.sul},${AREA_ENTREGA.oeste}|${AREA_ENTREGA.norte},${AREA_ENTREGA.leste}`,
+      key: chave,
+    },
+    timeout: 10000,
+  });
+  const dados = res.data;
+  if (dados.status === "REQUEST_DENIED") {
+    googleRecusado = true;
+    console.warn(
+      "[Frete] Google recusou a geocodificação (ative a Geocoding API na chave). Usando OpenStreetMap até reiniciar:",
+      dados.error_message || "",
+    );
+    return undefined;
+  }
+  if (dados.status === "ZERO_RESULTS") return null;
+  if (dados.status !== "OK") throw new Error(`Google respondeu ${dados.status}`);
+
+  // Primeiro resultado que cai dentro da área de entrega
+  const achou = dados.results.find(({ geometry }) =>
+    dentroDaArea(geometry.location.lat, geometry.location.lng),
+  );
+  if (!achou) return null;
+  return {
+    lat: achou.geometry.location.lat,
+    lon: achou.geometry.location.lng,
+    displayName: achou.formatted_address,
+  };
+}
+
+async function geocodificarOsm(texto) {
+  const res = await axiosWithRetry({
+    method: "get",
+    url: "https://nominatim.openstreetmap.org/search",
+    params: {
+      q: texto,
+      format: "json",
+      limit: 1,
+      countrycodes: "br",
+      viewbox: `${AREA_ENTREGA.oeste},${AREA_ENTREGA.norte},${AREA_ENTREGA.leste},${AREA_ENTREGA.sul}`,
+      bounded: 1,
+    },
+    headers: {
+      "User-Agent": "Dubob/1.0 (contato@dubob.com)",
+      "Accept-Language": "pt-BR",
+    },
+    timeout: 15000,
+  });
+  const [achou] = res.data || [];
+  if (!achou) return null;
+  return {
+    lat: parseFloat(achou.lat),
+    lon: parseFloat(achou.lon),
+    displayName: achou.display_name,
+  };
+}
+
+function garantirDentroDoRaio(distanciaKm) {
+  if (distanciaKm > RAIO_MAXIMO_KM) {
+    throw new AppError(
+      `Não entregamos nesse endereço: ele fica a ${distanciaKm.toLocaleString("pt-BR")} km da loja e entregamos até ${RAIO_MAXIMO_KM} km. Você pode escolher retirada no local.`,
+      422,
+    );
+  }
 }
 
 // Cache em memória das rotas já calculadas (chave: "lat,lon")
@@ -150,6 +246,24 @@ export class DeliveryService {
   }
 
   /**
+   * Frete de um pedido de entrega, recalculado no servidor a partir das
+   * coordenadas do endereço (não confia no valor mandado pelo site).
+   * Lança 422 se o endereço estiver fora do raio de entrega.
+   * @returns {Promise<{ distanciaKm: number, valorFreteNumerico: number }>}
+   */
+  async quoteDelivery(lat, lon) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      throw new AppError(
+        "Calcule o frete do endereço de entrega antes de finalizar o pedido.",
+        422,
+      );
+    }
+    const { distanciaKm } = await this.estimateTravel(lat, lon);
+    garantirDentroDoRaio(distanciaKm);
+    return { distanciaKm, valorFreteNumerico: FRETE_FIXO };
+  }
+
+  /**
    * Calcula o frete com base no CEP, número e cidade do cliente.
    * @param {string} cep    - CEP do cliente (com ou sem traço)
    * @param {string} numero - Número da residência
@@ -157,7 +271,7 @@ export class DeliveryService {
    * @returns {{ distanciaKm: number, valorFrete: string, tempoEstimado: number }}
    */
   async calculateFreight({ cep, numero, cidade, rua }) {
-    // ── Etapa 1: Geocodificação via Nominatim ────────────────────────────────
+    // ── Etapa 1: Geocodificação (Google, com OpenStreetMap de reserva) ───────
     const cleanCep = cep.replace(/\D/g, "");
     // Usa o nome da rua quando disponível para maior precisão
     const query =
@@ -168,35 +282,24 @@ export class DeliveryService {
     let lat, lon, displayName;
 
     try {
-      const nominatimRes = await axiosWithRetry({
-        method: "get",
-        url: "https://nominatim.openstreetmap.org/search",
-        params: {
-          q: query,
-          format: "json",
-          limit: 1,
-          countrycodes: "br",
-          // Restringe ao município de São Paulo (bounding box)
-          viewbox: "-46.8254,-23.3568,-46.3648,-24.0085",
-          bounded: 1,
-        },
-        headers: {
-          "User-Agent": "Dubob/1.0 (contato@dubob.com)",
-          "Accept-Language": "pt-BR",
-        },
-        timeout: 15000,
+      let local = await geocodificarGoogle(
+        rua && rua.trim()
+          ? `${rua.trim()}, ${numero}, ${cidade}, ${cleanCep}, Brasil`
+          : query,
+      ).catch((err) => {
+        console.warn("[Frete] Falha no Google, usando OpenStreetMap:", err.message);
+        return undefined;
       });
+      if (local === undefined) local = await geocodificarOsm(query);
 
-      if (!nominatimRes.data || nominatimRes.data.length === 0) {
+      if (!local) {
         throw new AppError(
           "Endereço não encontrado. Verifique o CEP, número e cidade informados.",
           422,
         );
       }
 
-      lat = parseFloat(nominatimRes.data[0].lat);
-      lon = parseFloat(nominatimRes.data[0].lon);
-      displayName = nominatimRes.data[0].display_name;
+      ({ lat, lon, displayName } = local);
     } catch (err) {
       if (err instanceof AppError) throw err;
       throw new AppError(
@@ -235,7 +338,8 @@ export class DeliveryService {
 
     // ── Etapa 3: Cálculo do Frete ────────────────────────────────────────────
     const distanciaKm = Math.round((distanceMeters / 1000) * 10) / 10;
-    const valorFreteNumerico = TAXA_BASE + distanciaKm * TAXA_POR_KM;
+    garantirDentroDoRaio(distanciaKm);
+    const valorFreteNumerico = FRETE_FIXO;
     const tempoEstimado = Math.ceil(durationSeconds / 60);
 
     return {

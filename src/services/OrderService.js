@@ -166,6 +166,18 @@ export class OrderService {
     });
     const numberReady = await ensureOrderNumberReady();
 
+    // Entrega: o frete é sempre recalculado aqui (o valor do site é ignorado)
+    // e endereço fora do raio é recusado. Retirada, mesa e comanda não pagam frete.
+    const isDelivery = Boolean(userId) && !mesaId && !comandaId && !isPickup;
+    if (isDelivery) {
+      ({ valorFreteNumerico: deliveryFee } = await deliveryService.quoteDelivery(
+        deliveryLat,
+        deliveryLon,
+      ));
+    } else if (deliveryFee != null) {
+      deliveryFee = 0;
+    }
+
     const order = await prisma.$transaction(
       async (tx) => {
         const normalizedItems = [];
@@ -175,10 +187,10 @@ export class OrderService {
           normalizedItems.push(normalized);
         }
 
-        const totalCents = normalizedItems.reduce(
-          (acc, item) => acc + item.totalPriceCents,
-          0,
-        );
+        // Total cobrado = itens + frete (igual ao total dos pedidos do iFood)
+        const totalCents =
+          normalizedItems.reduce((acc, item) => acc + item.totalPriceCents, 0) +
+          toCents(deliveryFee ?? 0);
 
         const paymentPayload = {
           provider: "MERCADO_PAGO",

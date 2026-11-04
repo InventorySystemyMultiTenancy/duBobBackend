@@ -40,6 +40,7 @@ describe("complementos pagos no item do pedido", () => {
 
     await service.createOrder({
       userId: "u1",
+      isPickup: true,
       items: [{ productId: milkshake.id, addonIds: [ninho.id], quantity: 2 }],
     });
 
@@ -58,6 +59,7 @@ describe("complementos pagos no item do pedido", () => {
     await expect(
       service.createOrder({
         userId: "u1",
+        isPickup: true,
         items: [{ productId: milkshake.id, addonIds: ["x"] }],
       }),
     ).rejects.toBeInstanceOf(AppError);
