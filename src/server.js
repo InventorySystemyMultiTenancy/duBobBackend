@@ -55,6 +55,36 @@ async function runMigrations() {
       FROM "Product" p
       WHERE p."id" IN ('db_mscomp_leite_ninho', 'db_mscomp_ovomaltine', 'db_mscomp_pacoquinha', 'db_mscomp_leite_condensado')
       ON CONFLICT ("productId", "size") DO NOTHING`,
+    // Complementos "Sugestão" do açaí (aparecem antes dos outros): já cadastrados DESLIGADOS e
+    // sem preço; o dono define o preço e ativa no admin quando quiser.
+    `INSERT INTO "Product" ("id", "name", "category", "isActive", "createdAt", "updatedAt")
+      VALUES
+        ('db_sug_nutella', 'Nutella', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_kit_kat', 'Kit Kat', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_bis', 'Bis', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_sonho_de_valsa', 'Sonho de Valsa', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_ouro_branco', 'Ouro Branco', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_pacoca', 'Paçoca', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_leite_ninho', 'Leite Ninho', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_kinder_bueno', 'Kinder Bueno', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_ferrero_rocher', 'Ferrero Rocher', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_oreo', 'Oreo', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_prestigio', 'Prestígio', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_mms', 'M&M''s', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_marshmallow', 'Marshmallow', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_gotas_chocolate', 'Gotas de Chocolate', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_doce_de_leite', 'Doce de Leite', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_mel', 'Mel', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_chantilly', 'Chantilly', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_coco_ralado', 'Coco Ralado', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_manga', 'Manga', 'complemento acai sugestao', false, NOW(), NOW()),
+        ('db_sug_uva', 'Uva', 'complemento acai sugestao', false, NOW(), NOW())
+      ON CONFLICT ("id") DO NOTHING`,
+    `INSERT INTO "ProductSize" ("id", "productId", "size", "label", "price", "createdAt", "updatedAt")
+      SELECT 'size_' || p."id", p."id", 'PEQUENA', 'Adicional', 0, NOW(), NOW()
+      FROM "Product" p
+      WHERE p."id" LIKE 'db_sug_%'
+      ON CONFLICT ("productId", "size") DO NOTHING`,
     // Pedidos que vêm de fora (iFood): origem, id lá fora e dados da entrega
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalSource" TEXT`,
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalId" TEXT`,
