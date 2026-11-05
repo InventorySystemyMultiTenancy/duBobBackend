@@ -59,6 +59,7 @@ export const createProductSchema = z
     availableDays: z.array(availableDaySchema).optional(),
     waiterOnly: z.boolean().optional(),
     isCrust: z.boolean().optional(),
+    featuredRank: z.number().int().positive().nullable().optional(),
     sizes: z.array(sizeSchema).min(1, "Informe ao menos um tamanho com preço"),
   })
   .superRefine(validatePricesByCategory);
@@ -76,6 +77,7 @@ export const updateProductSchema = z
     availableDays: z.array(availableDaySchema).optional(),
     waiterOnly: z.boolean().optional(),
     isCrust: z.boolean().optional(),
+    featuredRank: z.number().int().positive().nullable().optional(),
     sizes: z.array(sizeSchema).min(1).optional(),
   })
   .superRefine(validatePricesByCategory);

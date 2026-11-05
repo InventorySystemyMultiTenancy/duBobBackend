@@ -150,6 +150,52 @@ async function runMigrations() {
         INSERT INTO "AppSetting" ("key", "value", "updatedAt")
           VALUES ('migracao_complementos_acai_v1', 'feito', NOW());
       END $$`,
+    // "Mais pedidos" do milk shake: aparecem no topo de cada linha, na ordem
+    // do número (null = só em "Todos"). Marca-se/desmarca-se no admin.
+    `ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "featuredRank" INTEGER`,
+    // Carga inicial com a lista do cliente (roda UMA vez só).
+    `DO $$
+      BEGIN
+        CREATE TABLE IF NOT EXISTS "AppSetting" (
+          "key" TEXT PRIMARY KEY,
+          "value" TEXT,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        IF EXISTS (SELECT 1 FROM "AppSetting" WHERE "key" = 'mais_pedidos_milkshake_v1') THEN
+          RETURN;
+        END IF;
+
+        -- "Leite Condensado" não existia na linha tradicional
+        INSERT INTO "Product" ("id", "name", "category", "isActive", "createdAt", "updatedAt")
+          SELECT 'db_mstrad_leite_condensado', 'Leite Condensado', 'sabor milkshake tradicional', true, NOW(), NOW()
+          WHERE NOT EXISTS (
+            SELECT 1 FROM "Product"
+            WHERE lower("category") = 'sabor milkshake tradicional' AND lower("name") = 'leite condensado'
+          )
+          ON CONFLICT ("id") DO NOTHING;
+        INSERT INTO "ProductSize" ("id", "productId", "size", "label", "price", "createdAt", "updatedAt")
+          SELECT 'size_' || p."id", p."id", 'MEDIA', 'Config', 0, NOW(), NOW()
+          FROM "Product" p
+          WHERE p."id" = 'db_mstrad_leite_condensado'
+          ON CONFLICT ("productId", "size") DO NOTHING;
+
+        UPDATE "Product" SET "featuredRank" = CASE lower("name") WHEN 'chocolate' THEN 1 WHEN 'morango' THEN 2 WHEN 'leite condensado' THEN 3 WHEN 'sensacao' THEN 4 WHEN 'sonho de valsa' THEN 5 WHEN 'abacaxi com menta' THEN 6 WHEN 'chocomenta' THEN 7 WHEN 'blue ice' THEN 8 WHEN 'chicletes' THEN 9 WHEN 'brigadeiro' THEN 10 WHEN 'danoninho' THEN 11 WHEN 'mousse de limao' THEN 12 WHEN 'mousse de maracuja' THEN 13 WHEN 'mousse de morango' THEN 14 END, "updatedAt" = NOW()
+          WHERE lower("category") = 'sabor milkshake tradicional'
+            AND lower("name") IN ('chocolate', 'morango', 'leite condensado', 'sensacao', 'sonho de valsa', 'abacaxi com menta', 'chocomenta', 'blue ice', 'chicletes', 'brigadeiro', 'danoninho', 'mousse de limao', 'mousse de maracuja', 'mousse de morango');
+        UPDATE "Product" SET "featuredRank" = CASE lower("name") WHEN 'ovomaltine' THEN 1 WHEN 'leite ninho' THEN 2 WHEN 'bis branco' THEN 3 WHEN 'charger' THEN 4 WHEN 'bis preto' THEN 5 WHEN 'leite ninho trufado' THEN 6 WHEN 'trufa chocolate' THEN 7 WHEN 'trufa de prestigio' THEN 8 END, "updatedAt" = NOW()
+          WHERE lower("category") = 'sabor milkshake especial'
+            AND lower("name") IN ('ovomaltine', 'leite ninho', 'bis branco', 'charger', 'bis preto', 'leite ninho trufado', 'trufa chocolate', 'trufa de prestigio');
+        UPDATE "Product" SET "featuredRank" = CASE lower("name") WHEN 'leite ninho ao vinho' THEN 1 WHEN 'morango ao vinho' THEN 2 WHEN 'uva ao vinho' THEN 3 END, "updatedAt" = NOW()
+          WHERE lower("category") = 'sabor milkshake alcoolico'
+            AND lower("name") IN ('leite ninho ao vinho', 'morango ao vinho', 'uva ao vinho');
+        UPDATE "Product" SET "featuredRank" = CASE lower("name") WHEN 'nutella' THEN 1 WHEN 'kinder bueno' THEN 2 WHEN 'kinder ovo' THEN 3 WHEN 'ferrero rocher' THEN 4 END, "updatedAt" = NOW()
+          WHERE lower("category") = 'sabor milkshake premium'
+            AND lower("name") IN ('nutella', 'kinder bueno', 'kinder ovo', 'ferrero rocher');
+
+        INSERT INTO "AppSetting" ("key", "value", "updatedAt")
+          VALUES ('mais_pedidos_milkshake_v1', 'feito', NOW());
+      END $$`,
     // Pedidos que vêm de fora (iFood): origem, id lá fora e dados da entrega
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalSource" TEXT`,
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalId" TEXT`,

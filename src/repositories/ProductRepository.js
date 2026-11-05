@@ -38,6 +38,8 @@ function attachMetadata(product, metaMap) {
     category: meta?.category ?? "Geral",
     availableDays: meta?.availableDays ?? [],
     waiterOnly: meta?.waiterOnly ?? false,
+    // "Mais pedido": posição no topo da lista de sabores (null = não é)
+    featuredRank: meta?.featuredRank ?? null,
   };
 }
 
@@ -67,6 +69,15 @@ async function fetchProductMetadata(ids) {
     if (!isMissingSchemaFieldError(error)) throw error;
     rows = await prisma.$queryRaw`SELECT "id" FROM "Product" WHERE "id" = ANY(${ids})`;
   }
+  // Coluna nova (server.js cria): consulta à parte para não perder o resto
+  let ranks = new Map();
+  try {
+    const rankRows =
+      await prisma.$queryRaw`SELECT "id", "featuredRank" FROM "Product" WHERE "id" = ANY(${ids})`;
+    ranks = new Map(rankRows.map((r) => [r.id, r.featuredRank ?? null]));
+  } catch {
+    ranks = new Map();
+  }
   return new Map(
     rows.map((r) => [
       r.id,
@@ -74,6 +85,7 @@ async function fetchProductMetadata(ids) {
         category: r.category ?? "Geral",
         availableDays: normalizeAvailableDays(r.availableDays),
         waiterOnly: Boolean(r.waiterOnly),
+        featuredRank: ranks.get(r.id) ?? null,
       },
     ]),
   );
@@ -133,9 +145,17 @@ async function fetchProductColumns(tx) {
 async function updateProductMetadata(
   tx,
   productId,
-  { category, availableDays, waiterOnly },
+  { category, availableDays, waiterOnly, featuredRank },
 ) {
   const columns = await fetchProductColumns(tx);
+
+  if (featuredRank !== undefined && (!columns || columns.has("featuredRank"))) {
+    await tx.$executeRaw`
+        UPDATE "Product"
+        SET "featuredRank" = ${featuredRank}
+        WHERE "id" = ${productId}
+      `;
+  }
 
   if (category !== undefined && (!columns || columns.has("category"))) {
     await tx.$executeRaw`
@@ -271,6 +291,7 @@ export class ProductRepository {
     waiterOnly,
     isCrust,
     sizes,
+    featuredRank,
   }) {
     // Campos adicionados depois do Prisma Client podem ser gravados via raw SQL.
     const product = await prisma.product.create({
@@ -295,6 +316,7 @@ export class ProductRepository {
       category: cat,
       availableDays: days,
       waiterOnly: Boolean(waiterOnly),
+      featuredRank: featuredRank ?? undefined,
     });
     await applySizeLabels(prisma, product.id, sizes);
     const labelMap = await fetchSizeLabels([product.id]);
@@ -304,6 +326,7 @@ export class ProductRepository {
       category: cat,
       availableDays: days,
       waiterOnly: Boolean(waiterOnly),
+      featuredRank: featuredRank ?? null,
     };
   }
 
@@ -318,6 +341,7 @@ export class ProductRepository {
       waiterOnly,
       isCrust,
       sizes,
+      featuredRank,
     },
   ) {
     return prisma.$transaction(async (tx) => {
@@ -352,6 +376,7 @@ export class ProductRepository {
         category,
         availableDays,
         waiterOnly,
+        featuredRank,
       });
       console.log("[ProductRepository.update] metadados atualizados", {
         productId,
@@ -382,6 +407,7 @@ export class ProductRepository {
         availableDays:
           resolvedAvailableDays ?? updated?.availableDays ?? [],
         waiterOnly: resolvedWaiterOnly ?? updated?.waiterOnly ?? false,
+        ...(featuredRank !== undefined ? { featuredRank } : {}),
       };
     });
   }
