@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma.js";
+import { isExternalMotoboy } from "../lib/externalMotoboy.js";
 
 export class OrderRepository {
   _isMissingColumnError(error) {
@@ -980,7 +981,12 @@ export class OrderRepository {
           }
         : null,
       assignedMotoboy: o.assignedMotoboyId
-        ? { id: o.assignedMotoboyId, name: o.motoboyName }
+        ? {
+            id: o.assignedMotoboyId,
+            name: isExternalMotoboy(o.assignedMotoboyId)
+              ? "Motoboy de fora"
+              : o.motoboyName,
+          }
         : null,
       items: items.filter((i) => i.orderId === o.id),
       payment: payments.find((p) => p.orderId === o.id) ?? null,

@@ -91,6 +91,17 @@ describe("WhatsApp do delivery: regras", () => {
     expect(texto).toContain("*4821*");
     expect(texto).toContain("responda SAIR");
   });
+
+  it("motoboy de fora: sem nome e sem código de entrega", () => {
+    const texto = montarMensagem("SAIU", {
+      ...pedidoDelivery,
+      motoboyName: null,
+      assignedMotoboyId: "EXTERNO",
+    });
+    expect(texto).toContain("saiu para entrega.");
+    expect(texto).not.toContain("4821");
+    expect(texto).not.toContain("Código");
+  });
 });
 
 describe("WhatsApp do delivery: quando entra na fila", () => {

@@ -3,6 +3,7 @@ import { AppError } from "../errors/AppError.js";
 import { AppSettingRepository } from "../repositories/AppSettingRepository.js";
 import { WhatsappRepository } from "../repositories/WhatsappRepository.js";
 import { decryptSecret, encryptSecret } from "../lib/secretBox.js";
+import { isExternalMotoboy } from "../lib/externalMotoboy.js";
 
 // Avisos de WhatsApp do delivery pela Evolution API (mesma base do GrupoGK).
 // Os avisos entram numa fila gravada no banco e saem um por vez, com pausa
@@ -118,7 +119,11 @@ export function montarMensagem(etapa, pedido, textos = TEXTOS_PADRAO) {
       ? `#${pedido.number}`
       : `#${String(pedido.id).slice(-6).toUpperCase()}`,
     motoboy: primeiroNome(pedido.motoboyName),
-    codigo: pedido.deliveryCode ? String(pedido.deliveryCode) : "",
+    // Motoboy de fora não pede código de entrega
+    codigo:
+      pedido.deliveryCode && !isExternalMotoboy(pedido.assignedMotoboyId)
+        ? String(pedido.deliveryCode)
+        : "",
   });
   return texto + RODAPE;
 }

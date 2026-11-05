@@ -317,7 +317,7 @@ export class WhatsappRepository {
     const rows = await prisma.$queryRaw`
       SELECT o.id, o.status::text AS status, o."paymentStatus"::text AS "paymentStatus",
              o."paymentMethod", o."isPickup", o."mesaId", o."comandaId",
-             o."deliveryCode", o."contactPhone", o."number",
+             o."deliveryCode", o."contactPhone", o."number", o."assignedMotoboyId",
              u.name AS "userName", u.phone AS "userPhone",
              m.name AS "motoboyName"
       FROM "Order" o

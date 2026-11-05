@@ -11,6 +11,10 @@ import { PaymentRepository } from "../repositories/PaymentRepository.js";
 import { ExpenseService } from "./ExpenseService.js";
 import { DeliveryService } from "./DeliveryService.js";
 import {
+  EXTERNAL_MOTOBOY_ID,
+  isExternalMotoboy,
+} from "../lib/externalMotoboy.js";
+import {
   emitOrderCreated,
   emitMotoboyLocation,
   emitOrderStatusUpdated,
@@ -55,7 +59,8 @@ const getFreshMotoboyLocation = (motoboyId) => {
 const isTrackableDelivery = (order) =>
   order?.status === "SAIU_PARA_ENTREGA" &&
   !order.isPickup &&
-  Boolean(order.assignedMotoboyId);
+  Boolean(order.assignedMotoboyId) &&
+  !isExternalMotoboy(order.assignedMotoboyId);
 
 const toCents = (value) => Math.round(Number(value) * 100);
 const fromCents = (value) => (value / 100).toFixed(2);
@@ -397,20 +402,16 @@ export class OrderService {
       );
     }
 
-    if (
-      nextStatus === "SAIU_PARA_ENTREGA" &&
-      !order.mesaId &&
-      !order.isPickup &&
-      !order.assignedMotoboyId
-    ) {
-      throw new AppError(
-        "Selecione um motoboy antes de enviar para entrega.",
-        422,
-      );
+    // Entrega sem motoboy escolhido sai com "motoboy de fora" (o padrão)
+    const isDeliveryDispatch =
+      nextStatus === "SAIU_PARA_ENTREGA" && !order.mesaId && !order.isPickup;
+    if (isDeliveryDispatch && !order.assignedMotoboyId) {
+      await this.orderRepository.assignMotoboy(orderId, EXTERNAL_MOTOBOY_ID);
+      order.assignedMotoboyId = EXTERNAL_MOTOBOY_ID;
     }
 
     const deliveredAt = nextStatus === "ENTREGUE" ? new Date() : null;
-    const updatedOrder = await this.orderRepository.updateStatus(
+    let updatedOrder = await this.orderRepository.updateStatus(
       orderId,
       nextStatus,
       deliveredAt,
@@ -424,6 +425,23 @@ export class OrderService {
       isPickup: Boolean(order.isPickup),
       mesaId: order.mesaId ?? null,
     });
+
+    // Motoboy de fora não confirma a entrega: o pedido finaliza ao sair
+    if (isDeliveryDispatch && isExternalMotoboy(order.assignedMotoboyId)) {
+      updatedOrder = await this.orderRepository.updateStatus(
+        orderId,
+        "ENTREGUE",
+        new Date(),
+      );
+      emitOrderStatusUpdated({
+        orderId: updatedOrder.id,
+        userId: order.userId,
+        previousStatus: "SAIU_PARA_ENTREGA",
+        status: updatedOrder.status,
+        isPickup: false,
+        mesaId: null,
+      });
+    }
 
     return updatedOrder;
   }

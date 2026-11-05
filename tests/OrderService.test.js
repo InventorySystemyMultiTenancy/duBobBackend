@@ -46,6 +46,75 @@ describe("OrderService", () => {
     expect(orderRepository.updateStatus).not.toHaveBeenCalled();
   });
 
+  it("entrega sem motoboy sai com motoboy de fora e ja finaliza", async () => {
+    const orderRepository = {
+      findById: vi.fn(async () => ({
+        id: "order-1",
+        status: "PRONTO",
+        userId: "u1",
+        isPickup: false,
+        mesaId: null,
+        assignedMotoboyId: null,
+      })),
+      assignMotoboy: vi.fn(async () => {}),
+      updateStatus: vi.fn(async (id, status) => ({ id, status })),
+    };
+
+    const service = new OrderService(orderRepository, {}, {});
+    const updated = await service.updateOrderStatus(
+      "order-1",
+      "SAIU_PARA_ENTREGA",
+    );
+
+    expect(orderRepository.assignMotoboy).toHaveBeenCalledWith(
+      "order-1",
+      "EXTERNO",
+    );
+    expect(orderRepository.updateStatus.mock.calls.map((c) => c[1])).toEqual([
+      "SAIU_PARA_ENTREGA",
+      "ENTREGUE",
+    ]);
+    expect(orderRepository.updateStatus.mock.calls[1][2]).toBeInstanceOf(Date);
+    expect(updated.status).toBe("ENTREGUE");
+  });
+
+  it("entrega com motoboy da loja continua em rota", async () => {
+    const orderRepository = {
+      findById: vi.fn(async () => ({
+        id: "order-1",
+        status: "PRONTO",
+        isPickup: false,
+        mesaId: null,
+        assignedMotoboyId: "moto-1",
+      })),
+      assignMotoboy: vi.fn(),
+      updateStatus: vi.fn(async (id, status) => ({ id, status })),
+    };
+
+    const service = new OrderService(orderRepository, {}, {});
+    const updated = await service.updateOrderStatus(
+      "order-1",
+      "SAIU_PARA_ENTREGA",
+    );
+
+    expect(orderRepository.assignMotoboy).not.toHaveBeenCalled();
+    expect(orderRepository.updateStatus).toHaveBeenCalledOnce();
+    expect(updated.status).toBe("SAIU_PARA_ENTREGA");
+  });
+
+  it("motoboy de fora nao tem localizacao para o cliente", async () => {
+    const orderRepository = {
+      findById: vi.fn(async () => ({
+        id: "order-1",
+        status: "SAIU_PARA_ENTREGA",
+        isPickup: false,
+        assignedMotoboyId: "EXTERNO",
+      })),
+    };
+    const service = new OrderService(orderRepository, {}, {});
+    expect(await service.getOrderMotoboyLocation("order-1", null)).toBeNull();
+  });
+
   it("deve vincular pagamento legado da maquininha pelo terminalIntentId salvo", async () => {
     process.env.MP_ACCESS_TOKEN = "token-teste";
     paymentGetMock.mockResolvedValue({
