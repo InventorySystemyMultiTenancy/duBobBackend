@@ -85,6 +85,71 @@ async function runMigrations() {
       FROM "Product" p
       WHERE p."id" LIKE 'db_sug_%'
       ON CONFLICT ("productId", "size") DO NOTHING`,
+    // Complementos do açaí conforme a lista do cliente (roda UMA vez só: marca
+    // em AppSetting, para não desfazer o que for mudado depois no admin).
+    // Inclusos: leite condensado, leite em pó, banana, granola, granulado e as
+    // coberturas. R$ 5,00: choco avelã, creme de leite ninho, creme de
+    // amendoim, ganache preta, cookies cream, choco wafer branco e preto, mini
+    // confete e ovomaltine. R$ 4,00: morango e kiwi. Fora da lista: ocultos.
+    `DO $$
+      BEGIN
+        CREATE TABLE IF NOT EXISTS "AppSetting" (
+          "key" TEXT PRIMARY KEY,
+          "value" TEXT,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        IF EXISTS (SELECT 1 FROM "AppSetting" WHERE "key" = 'migracao_complementos_acai_v1') THEN
+          RETURN;
+        END IF;
+
+        UPDATE "Product" SET "category" = 'complemento acai premium', "isActive" = true, "updatedAt" = NOW()
+          WHERE lower("category") = 'complemento acai'
+            AND lower("name") IN ('chocolate com avela', 'creme de leite ninho', 'creme de amendoim',
+              'ganache preto', 'cookies cream', 'choco wafer branco', 'choco wafer', 'mini confete',
+              'ovomaltine', 'morango', 'kiwi');
+        UPDATE "ProductSize" ps SET "price" = CASE WHEN lower(p."name") IN ('morango', 'kiwi') THEN 4.00 ELSE 5.00 END,
+            "label" = 'Adicional', "updatedAt" = NOW()
+          FROM "Product" p
+          WHERE ps."productId" = p."id" AND p."category" = 'complemento acai premium'
+            AND lower(p."name") IN ('chocolate com avela', 'creme de leite ninho', 'creme de amendoim',
+              'ganache preto', 'cookies cream', 'choco wafer branco', 'choco wafer', 'mini confete',
+              'ovomaltine', 'morango', 'kiwi');
+
+        -- Ovomaltine não existia nos complementos do açaí: cria já premium
+        INSERT INTO "Product" ("id", "name", "category", "isActive", "createdAt", "updatedAt")
+          SELECT 'db_premium_ovomaltine', 'Ovomaltine', 'complemento acai premium', true, NOW(), NOW()
+          WHERE NOT EXISTS (
+            SELECT 1 FROM "Product"
+            WHERE "category" = 'complemento acai premium' AND lower("name") = 'ovomaltine'
+          )
+          ON CONFLICT ("id") DO NOTHING;
+        INSERT INTO "ProductSize" ("id", "productId", "size", "label", "price", "createdAt", "updatedAt")
+          SELECT 'size_' || p."id", p."id", 'PEQUENA', 'Adicional', 5.00, NOW(), NOW()
+          FROM "Product" p
+          WHERE p."id" = 'db_premium_ovomaltine'
+          ON CONFLICT ("productId", "size") DO NOTHING;
+
+        UPDATE "Product" SET "isActive" = false, "updatedAt" = NOW()
+          WHERE lower("category") = 'complemento acai'
+            AND lower("name") IN ('amendoim triturado', 'ganache branco', 'wafer branco');
+
+        INSERT INTO "Product" ("id", "name", "category", "isActive", "createdAt", "updatedAt")
+          VALUES
+            ('db_cobertura_chocolate', 'Cobertura de Chocolate', 'complemento acai', true, NOW(), NOW()),
+            ('db_cobertura_brigadeiro', 'Cobertura de Brigadeiro', 'complemento acai', true, NOW(), NOW()),
+            ('db_cobertura_morango', 'Cobertura de Morango', 'complemento acai', true, NOW(), NOW()),
+            ('db_cobertura_caramelo', 'Cobertura de Caramelo', 'complemento acai', true, NOW(), NOW())
+          ON CONFLICT ("id") DO NOTHING;
+        INSERT INTO "ProductSize" ("id", "productId", "size", "label", "price", "createdAt", "updatedAt")
+          SELECT 'size_' || p."id", p."id", 'MEDIA', 'Config', 0, NOW(), NOW()
+          FROM "Product" p
+          WHERE p."id" LIKE 'db_cobertura_%'
+          ON CONFLICT ("productId", "size") DO NOTHING;
+
+        INSERT INTO "AppSetting" ("key", "value", "updatedAt")
+          VALUES ('migracao_complementos_acai_v1', 'feito', NOW());
+      END $$`,
     // Pedidos que vêm de fora (iFood): origem, id lá fora e dados da entrega
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalSource" TEXT`,
     `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "externalId" TEXT`,
