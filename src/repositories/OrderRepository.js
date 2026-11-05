@@ -417,6 +417,16 @@ export class OrderRepository {
     return this.findById(orderId);
   }
 
+  // Junta dados extras no pedido (motivo do cancelamento, dados do iFood)
+  async mergeExternalPayload(orderId, patch) {
+    await prisma.$executeRaw`
+      UPDATE "Order"
+      SET "externalPayload" = COALESCE("externalPayload", '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb,
+          "updatedAt" = NOW()
+      WHERE id = ${orderId}
+    `;
+  }
+
   async updatePaymentStatus(orderId, paymentStatus, paymentMethod) {
     return prisma.order.update({
       where: { id: orderId },
@@ -708,6 +718,7 @@ export class OrderRepository {
           o."deliveryAddress", o.notes, o."paymentMethod",
           o.total, o."deliveryFee", o."deliveryLat", o."deliveryLon",
           o."isPickup", o."number", o."assignedMotoboyId", o."deliveryCode",
+          o."terminalIntentId",
           o."externalSource", o."externalDisplayId", o."externalPayload",
           o."createdAt", o."updatedAt", o."deliveredAt"
         FROM "Order" o

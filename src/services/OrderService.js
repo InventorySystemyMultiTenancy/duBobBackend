@@ -1,4 +1,8 @@
-import { MercadoPagoConfig, Payment as MPPayment } from "mercadopago";
+import {
+  MercadoPagoConfig,
+  Payment as MPPayment,
+  PaymentRefund as MPPaymentRefund,
+} from "mercadopago";
 import { Prisma } from "@prisma/client";
 import { AppError } from "../errors/AppError.js";
 import { prisma } from "../lib/prisma.js";
@@ -10,6 +14,7 @@ import { OrderRepository } from "../repositories/OrderRepository.js";
 import { PaymentRepository } from "../repositories/PaymentRepository.js";
 import { ExpenseService } from "./ExpenseService.js";
 import { DeliveryService } from "./DeliveryService.js";
+import { PaymentSettingsService } from "./PaymentSettingsService.js";
 import {
   EXTERNAL_MOTOBOY_ID,
   isExternalMotoboy,
@@ -67,6 +72,36 @@ const fromCents = (value) => (value / 100).toFixed(2);
 const startOfDay = (date) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const startOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1);
+const SUMUP_CHECKOUT_PREFIX = "sumup-checkout:";
+
+// Como devolver o dinheiro se o pedido pago for cancelado. Só o pagamento
+// online (Mercado Pago PIX/cartão e checkout da SumUp) é estornado pela API;
+// dinheiro, "pagar depois" e maquininha a loja devolve na mão.
+export function getRefundInfo(order) {
+  if (order?.paymentStatus !== "APROVADO" || order.externalSource) return null;
+  const payment = order.payment ?? null;
+  const externalId = String(payment?.externalId ?? "");
+  const intent = String(order.terminalIntentId ?? "");
+
+  if (payment?.provider === "MERCADO_PAGO" && !intent && /^\d+$/.test(externalId)) {
+    return { tipo: "AUTOMATICO", provedor: "MERCADO_PAGO", transacao: externalId };
+  }
+  if (
+    payment?.provider === "SUMUP" &&
+    intent.startsWith(SUMUP_CHECKOUT_PREFIX) &&
+    externalId.startsWith("sumup:")
+  ) {
+    return {
+      tipo: "AUTOMATICO",
+      provedor: "SUMUP",
+      transacao: externalId.slice("sumup:".length),
+    };
+  }
+  return { tipo: "MANUAL", provedor: payment?.provider ?? null };
+}
+
+const PROVIDER_LABELS = { MERCADO_PAGO: "Mercado Pago", SUMUP: "SumUp" };
+
 const isMercadoPagoInternalReference = (value) =>
   !!value && /^INSTORE-/i.test(String(value));
 
@@ -132,11 +167,13 @@ export class OrderService {
     productRepositoryOrPaymentRepository = new PaymentRepository(),
     paymentRepository = null,
     expenseService = new ExpenseService(),
+    paymentSettingsService = new PaymentSettingsService(),
   ) {
     this.orderRepository = orderRepository;
     this.paymentRepository =
       paymentRepository ?? productRepositoryOrPaymentRepository;
     this.expenseService = expenseService;
+    this.paymentSettingsService = paymentSettingsService;
   }
 
   async createOrder({
@@ -343,7 +380,9 @@ export class OrderService {
     return order;
   }
 
-  async cancelOrder(orderId) {
+  // Pedido pago online é estornado antes de cancelar: se o estorno falhar,
+  // o pedido continua como estava e a tela mostra o erro.
+  async cancelOrder(orderId, { motivo, user } = {}) {
     const order = await this.orderRepository.findById(orderId);
 
     if (!order) {
@@ -358,10 +397,34 @@ export class OrderService {
       throw new AppError("Pedido já está cancelado.", 409);
     }
 
+    const refund = getRefundInfo(order);
+    let estorno = refund && { tipo: refund.tipo, provedor: refund.provedor };
+    const refunded = refund?.tipo === "AUTOMATICO";
+
+    if (refunded) {
+      const result = await this.#refundPayment(order, refund);
+      estorno = { ...estorno, id: result.id, valor: Number(order.total) };
+      await this.paymentRepository.updateStatus(orderId, "ESTORNADO");
+      await this.orderRepository.updatePaymentStatus(orderId, "ESTORNADO");
+    }
+
     const updatedOrder = await this.orderRepository.updateStatus(
       orderId,
       "CANCELADO",
     );
+
+    await this.orderRepository
+      .mergeExternalPayload(orderId, {
+        cancelamentoLoja: {
+          motivo: String(motivo ?? "").trim().slice(0, 300) || null,
+          por: user?.email ?? null,
+          em: new Date().toISOString(),
+          estorno,
+        },
+      })
+      .catch((error) =>
+        console.error("[cancelOrder] motivo não salvo:", error.message),
+      );
 
     emitOrderStatusUpdated({
       orderId: updatedOrder.id,
@@ -371,7 +434,51 @@ export class OrderService {
       paymentWasPending: order.paymentStatus === "PENDENTE",
     });
 
-    return updatedOrder;
+    if (refunded) {
+      emitPaymentUpdated({
+        orderId,
+        userId: order.userId,
+        paymentStatus: "ESTORNADO",
+      });
+    }
+
+    return {
+      ...updatedOrder,
+      ...(refunded ? { paymentStatus: "ESTORNADO" } : {}),
+      estorno,
+    };
+  }
+
+  async #refundPayment(order, refund) {
+    const label = PROVIDER_LABELS[refund.provedor] ?? refund.provedor;
+    try {
+      if (refund.provedor === "MERCADO_PAGO") {
+        const mpToken = process.env.MP_ACCESS_TOKEN;
+        if (!mpToken) throw new Error("Mercado Pago não configurado");
+        const client = new MercadoPagoConfig({ accessToken: mpToken });
+        // Mesma chave em toda tentativa: repetir não estorna duas vezes
+        const result = await new MPPaymentRefund(client).create({
+          payment_id: refund.transacao,
+          requestOptions: { idempotencyKey: `cancel-${order.id}` },
+        });
+        return { id: result?.id != null ? String(result.id) : null };
+      }
+
+      const { client } = await this.paymentSettingsService.requireSumUpClient();
+      const result = await client.refundTransaction(refund.transacao);
+      return { id: result?.id != null ? String(result.id) : null };
+    } catch (error) {
+      const detail =
+        error?.cause?.[0]?.description ?? error?.message ?? "erro desconhecido";
+      console.error(
+        `[cancelOrder] estorno ${refund.provedor} do pedido ${order.id} falhou:`,
+        detail,
+      );
+      throw new AppError(
+        `Não foi possível estornar o pagamento na ${label} (${detail}). O pedido NÃO foi cancelado; tente de novo ou estorne pelo painel da ${label}.`,
+        502,
+      );
+    }
   }
 
   async updateOrderStatus(orderId, nextStatus) {
@@ -1054,7 +1161,14 @@ export class OrderService {
         });
       }
 
-      return filtered;
+      // A tela de cancelar avisa se o estorno é automático ou manual
+      return filtered.map((o) => {
+        const refund = getRefundInfo(o);
+        return {
+          ...o,
+          estorno: refund && { tipo: refund.tipo, provedor: refund.provedor },
+        };
+      });
     } catch (error) {
       console.error("[listActiveOrders] falhou", {
         message: error?.message ?? null,

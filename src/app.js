@@ -471,7 +471,7 @@ app.get(
 app.patch(
   "/api/orders/:orderId/cancel",
   authenticateToken,
-  authorizeRoles("ADMIN", "FUNCIONARIO"),
+  authorizeRoles("ADMIN", "FUNCIONARIO", "ATENDENTE", "COZINHA_DELIVERY"),
   (req, res, next) => orderController.cancel(req, res, next),
 );
 

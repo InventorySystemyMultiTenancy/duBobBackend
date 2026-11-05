@@ -214,10 +214,16 @@ export class OrderController {
 
   async cancel(req, res, next) {
     try {
-      const updatedOrder = await orderService.cancelOrder(req.params.orderId);
+      const updatedOrder = await orderService.cancelOrder(req.params.orderId, {
+        motivo: req.body?.motivo,
+        user: req.user,
+      });
 
       return res.status(200).json({
-        message: "Pedido cancelado.",
+        message:
+          updatedOrder.estorno?.tipo === "AUTOMATICO"
+            ? "Pedido cancelado e pagamento estornado."
+            : "Pedido cancelado.",
         data: updatedOrder,
       });
     } catch (error) {

@@ -36,4 +36,8 @@ export class PaymentRepository {
       },
     });
   }
+
+  async updateStatus(orderId, status) {
+    return prisma.payment.updateMany({ where: { orderId }, data: { status } });
+  }
 }

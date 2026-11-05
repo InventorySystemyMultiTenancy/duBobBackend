@@ -185,6 +185,15 @@ export class SumUpClient {
     return response.ok ? (await response.text()).trim() : null;
   }
 
+  // Estorno total de uma venda (id da transação na SumUp).
+  async refundTransaction(transactionId) {
+    return this.request(
+      "POST",
+      `/v0.1/me/refund/${encodeURIComponent(transactionId)}`,
+      {},
+    );
+  }
+
   // Histórico de vendas aprovadas. Não filtramos por payment_types: no
   // CompactPay o filtro POS fazia a API devolver zero vendas da maquininha.
   async listSuccessfulTransactions(merchantCode, changesSince) {
